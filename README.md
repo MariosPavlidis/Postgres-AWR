@@ -1,4 +1,4 @@
-# postgres-awr 1.0.0
+# postgres-awr 1.0.1
 
 SQL-only, centralized PostgreSQL monitoring repository for PostgreSQL 17 and 18.
 It is AWR-inspired; it is not an Oracle AWR clone and does not use undocumented
@@ -10,6 +10,8 @@ This first release implements the repository and reliable snapshot foundation:
 
 - dedicated `postgres_monitoring` database
 - local cluster statistics
+- per-snapshot PostgreSQL system metrics: uptime, connection utilization,
+  active/waiting sessions, lock pressure and total database size
 - `dblink` collection of database-scoped SQL, table and index statistics
 - component-level status and errors
 - version-aware `pg_stat_io` byte accounting (`op_bytes` on 17; byte
@@ -33,6 +35,22 @@ ASH sampling and full HTML reports are intentionally deferred to v1.1.
    additional object privileges.
 6. Authentication supplied by a libpq service plus passfile, or `.pgpass`.
    Never embed a password in `database_target.service_name`.
+
+`cluster_target` uses PostgreSQL terminology: one initialized PostgreSQL data
+directory is a cluster. A standalone server is fully supported; Patroni,
+streaming replication and an HA manager are not prerequisites. On a standalone
+server, replication snapshot tables are simply empty.
+
+The `pg_stat_statements` extension must exist in the repository database and in
+every monitored database for which `collect_pgss=true`:
+
+```sql
+CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
+```
+
+The installer discovers the extension schema and creates a hardened local
+bridge for `pg_stat_statements_info`; it does not add `public` to the
+`SECURITY DEFINER` procedure search path.
 
 Recommended settings:
 
@@ -183,4 +201,3 @@ psql -X -v ON_ERROR_STOP=1 -d postgres_monitoring -f validate.sql
 - Function, subscription, SLRU and configuration-history snapshots are planned
   for v1.1.
 - ASH-style sampling and HTML reporting are planned for v1.1.
-# Postgres-monitoring
