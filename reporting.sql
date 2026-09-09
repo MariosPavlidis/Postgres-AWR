@@ -374,6 +374,37 @@ AS $$
    AND e.n_tup_del>=b.n_tup_del AND e.n_tup_hot_upd>=b.n_tup_hot_upd;
 $$;
 
+CREATE OR REPLACE FUNCTION dba_mon.report_vacuum_delta(
+  p_begin_snapshot_id bigint, p_end_snapshot_id bigint
+) RETURNS TABLE (database_target_id bigint, database_name name,
+  schemaname name, relname name, vacuum_count bigint, autovacuum_count bigint,
+  analyze_count bigint, autoanalyze_count bigint, dead_tuples bigint,
+  modifications_since_analyze bigint, last_vacuum timestamptz,
+  last_autovacuum timestamptz, last_analyze timestamptz,
+  last_autoanalyze timestamptz)
+LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path = pg_catalog, dba_mon
+AS $$
+ SELECT e.database_target_id,dt.database_name,e.schemaname,e.relname,
+        e.vacuum_count-b.vacuum_count,e.autovacuum_count-b.autovacuum_count,
+        e.analyze_count-b.analyze_count,e.autoanalyze_count-b.autoanalyze_count,
+        e.n_dead_tup,e.n_mod_since_analyze,e.last_vacuum,e.last_autovacuum,
+        e.last_analyze,e.last_autoanalyze
+ FROM dba_mon.table_snap b JOIN dba_mon.table_snap e
+   ON e.database_target_id=b.database_target_id AND e.relid=b.relid
+ JOIN dba_mon.database_target dt
+   ON dt.database_target_id=e.database_target_id
+ WHERE b.snapshot_id=$1 AND e.snapshot_id=$2
+   AND EXISTS (SELECT 1 FROM dba_mon.snapshot sb,dba_mon.snapshot se
+               WHERE sb.snapshot_id=$1 AND se.snapshot_id=$2
+                 AND sb.postmaster_start_time=se.postmaster_start_time
+                 AND sb.stats_reset IS NOT DISTINCT FROM se.stats_reset)
+   AND e.vacuum_count>=b.vacuum_count
+   AND e.autovacuum_count>=b.autovacuum_count
+   AND e.analyze_count>=b.analyze_count
+   AND e.autoanalyze_count>=b.autoanalyze_count;
+$$;
+
 CREATE OR REPLACE FUNCTION dba_mon.report_index_delta(
   p_begin_snapshot_id bigint, p_end_snapshot_id bigint
 ) RETURNS TABLE (database_target_id bigint, database_name name,
@@ -447,11 +478,12 @@ BEGIN
     || 'th{position:sticky;top:0;background:#eaf0f8;color:#243b5a}th:first-child,td:first-child{text-align:left}'
     || 'tr:nth-child(even){background:#f8fafc}.query{white-space:normal;min-width:440px;text-align:left}'
     || '.sev-ERROR{color:var(--bad);font-weight:700}.sev-WARNING{color:var(--warn);font-weight:700}'
-    || '.sev-OK{color:var(--ok)}.empty{color:var(--muted);padding:12px}footer{margin:30px 0;color:var(--muted)}'
+    || '.sev-OK{color:var(--ok)}.empty{color:var(--muted);padding:12px}'
+    || '.back-to-top{display:block;margin:7px 2px 0;text-align:right;font-size:12px}footer{margin:30px 0;color:var(--muted)}'
     || '@media print{body{background:#fff}main{max-width:none;padding:8px}.table-wrap{overflow:visible}'
     || 'th{position:static}section{break-inside:avoid}}'
     || '</style></head><body><main>'
-    || '<h1>PostgreSQL AWR Report</h1><p class="sub">AWR-inspired snapshot comparison</p>'
+    || '<h1 id="top">PostgreSQL AWR Report</h1><p class="sub">AWR-inspired snapshot comparison</p>'
     || format('<div class="banner %s">Data quality: %s</div>',v_severity,upper(v_severity))
     || '<div class="grid">'
     || format('<div class="card"><div class="label">Cluster</div><div class="value">%s</div></div>',dba_mon._html_escape(i.cluster_name))
@@ -470,7 +502,7 @@ BEGIN
   FROM dba_mon.report_quality(p_begin_snapshot_id,p_end_snapshot_id);
   v_html := v_html || '<section><h2>Data Quality</h2><div class="table-wrap"><table>'
     || '<thead><tr><th>Severity</th><th>Check</th><th>Message</th></tr></thead><tbody>'
-    || v_rows || '</tbody></table></div></section>';
+    || v_rows || '</tbody></table></div><a class="back-to-top" href="#top">Back to top</a></section>';
 
   SELECT coalesce(sum(calls),0) calls,coalesce(sum(total_exec_time_ms),0) exec_ms,
          coalesce(sum(rows),0) rows,coalesce(sum(shared_blks_read),0) reads,
@@ -495,7 +527,7 @@ BEGIN
   v_html := v_html || '<section><h2>Database Workload</h2><div class="table-wrap"><table><thead><tr>'
     || '<th>Database</th><th>Commits</th><th>Rollbacks</th><th>Cache hit %</th><th>Inserts</th>'
     || '<th>Updates</th><th>Deletes</th><th>Temp files</th><th>Temp bytes</th>'
-    || '</tr></thead><tbody>' || v_rows || '</tbody></table></div></section>';
+    || '</tr></thead><tbody>' || v_rows || '</tbody></table></div><a class="back-to-top" href="#top">Back to top</a></section>';
 
   SELECT * INTO r FROM dba_mon.system_snap WHERE snapshot_id=p_end_snapshot_id;
   IF FOUND THEN
@@ -530,7 +562,7 @@ BEGIN
     v_html := v_html || format('<section><h2>%s</h2><div class="table-wrap"><table><thead><tr>',v_title)
       || '<th>Database</th><th>Query ID</th><th>Calls</th><th>Total ms</th><th>Mean ms</th>'
       || '<th>Reads</th><th>Temp writes</th><th>SQL text</th></tr></thead><tbody>'
-      || v_rows || '</tbody></table></div></section>';
+      || v_rows || '</tbody></table></div><a class="back-to-top" href="#top">Back to top</a></section>';
   END LOOP;
 
   SELECT coalesce(string_agg(format('<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td>'
@@ -544,7 +576,7 @@ BEGIN
   v_html := v_html || '<section><h2>I/O Profile</h2><div class="table-wrap"><table><thead><tr>'
     || '<th>Backend</th><th>Object</th><th>Context</th><th>Reads</th><th>Read bytes</th>'
     || '<th>Writes</th><th>Write bytes</th><th>I/O time ms</th></tr></thead><tbody>'
-    || v_rows || '</tbody></table></div></section>';
+    || v_rows || '</tbody></table></div><a class="back-to-top" href="#top">Back to top</a></section>';
 
   SELECT * INTO r FROM dba_mon.report_wal_delta(p_begin_snapshot_id,p_end_snapshot_id);
   v_html := v_html || '<section><h2>WAL and Checkpoints</h2><div class="grid">';
@@ -584,18 +616,35 @@ BEGIN
         ORDER BY seq_tup_read+inserts+updates+deletes DESC LIMIT 20) q;
   v_html := v_html || '<section><h2>Top Table Activity</h2><div class="table-wrap"><table><thead><tr>'
     || '<th>Database</th><th>Table</th><th>Sequential rows</th><th>Inserts</th><th>Updates</th>'
-    || '<th>Deletes</th><th>Dead tuples</th></tr></thead><tbody>' || v_rows || '</tbody></table></div></section>';
+    || '<th>Deletes</th><th>Dead tuples</th></tr></thead><tbody>' || v_rows || '</tbody></table></div><a class="back-to-top" href="#top">Back to top</a></section>';
 
   SELECT coalesce(string_agg(format('<tr><td>%s</td><td>%s.%s</td><td>%s</td><td>%s</td>'
-      || '<td>%s</td><td>%s</td></tr>',dba_mon._html_escape(database_name::text),
-      dba_mon._html_escape(schemaname::text),dba_mon._html_escape(indexrelname::text),idx_scan,
-      idx_tup_read,idx_tup_fetch,pg_size_pretty(index_size)),''),
-      '<tr><td colspan="6" class="empty">No valid index deltas</td></tr>') INTO v_rows
+      || '<td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>',
+      dba_mon._html_escape(database_name::text),dba_mon._html_escape(schemaname::text),
+      dba_mon._html_escape(relname::text),vacuum_count,autovacuum_count,analyze_count,
+      autoanalyze_count,dead_tuples,modifications_since_analyze,
+      dba_mon._html_escape(coalesce(greatest(last_vacuum,last_autovacuum)::text,'never'))),''),
+      '<tr><td colspan="9" class="empty">No valid vacuum statistics</td></tr>') INTO v_rows
+  FROM (SELECT * FROM dba_mon.report_vacuum_delta(p_begin_snapshot_id,p_end_snapshot_id)
+        ORDER BY vacuum_count+autovacuum_count DESC,dead_tuples DESC LIMIT 20) q;
+  v_html := v_html || '<section><h2>Vacuum and Analyze Statistics</h2><div class="table-wrap"><table><thead><tr>'
+    || '<th>Database</th><th>Table</th><th>Manual vacuum</th><th>Autovacuum</th>'
+    || '<th>Manual analyze</th><th>Autoanalyze</th><th>Dead tuples</th><th>Changes since analyze</th>'
+    || '<th>Last vacuum</th></tr></thead><tbody>' || v_rows || '</tbody></table></div>'
+    || '<a class="back-to-top" href="#top">Back to top</a></section>';
+
+  SELECT coalesce(string_agg(format('<tr><td>%s</td><td>%s.%s</td><td>%s</td><td>%s</td>'
+      || '<td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>',dba_mon._html_escape(database_name::text),
+      dba_mon._html_escape(schemaname::text),dba_mon._html_escape(indexrelname::text),
+      dba_mon._html_escape(relname::text),idx_scan,idx_tup_read,idx_tup_fetch,
+      pg_size_pretty(index_size),dba_mon._html_escape(coalesce(last_idx_scan::text,'never'))),''),
+      '<tr><td colspan="8" class="empty">No valid index deltas</td></tr>') INTO v_rows
   FROM (SELECT * FROM dba_mon.report_index_delta(p_begin_snapshot_id,p_end_snapshot_id)
         ORDER BY idx_scan DESC,index_size DESC LIMIT 20) q;
   v_html := v_html || '<section><h2>Index Activity</h2><div class="table-wrap"><table><thead><tr>'
-    || '<th>Database</th><th>Index</th><th>Scans</th><th>Entries read</th><th>Tuples fetched</th>'
-    || '<th>Size</th></tr></thead><tbody>' || v_rows || '</tbody></table></div></section>';
+    || '<th>Database</th><th>Index</th><th>Table</th><th>Scans</th><th>Entries read</th><th>Tuples fetched</th>'
+    || '<th>Size</th><th>Last scan</th></tr></thead><tbody>' || v_rows || '</tbody></table></div>'
+    || '<a class="back-to-top" href="#top">Back to top</a></section>';
 
   SELECT coalesce(string_agg(format('<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>',
       dba_mon._html_escape(application_name),dba_mon._html_escape(coalesce(client_addr::text,'')),
@@ -605,7 +654,7 @@ BEGIN
   FROM dba_mon.replication_snap WHERE snapshot_id=p_end_snapshot_id;
   v_html := v_html || '<section><h2>Replication at End Snapshot</h2><div class="table-wrap"><table><thead><tr>'
     || '<th>Application</th><th>Client</th><th>State</th><th>Sync state</th><th>Replay lag</th>'
-    || '</tr></thead><tbody>' || v_rows || '</tbody></table></div></section>';
+    || '</tr></thead><tbody>' || v_rows || '</tbody></table></div><a class="back-to-top" href="#top">Back to top</a></section>';
 
   SELECT coalesce(string_agg(format('<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>',
       dba_mon._html_escape(slot_name::text),dba_mon._html_escape(slot_type),active,
@@ -614,7 +663,7 @@ BEGIN
   FROM dba_mon.slot_snap WHERE snapshot_id=p_end_snapshot_id;
   v_html := v_html || '<section><h2>Replication Slots at End Snapshot</h2><div class="table-wrap"><table><thead><tr>'
     || '<th>Slot</th><th>Type</th><th>Active</th><th>WAL status</th><th>Safe WAL size</th>'
-    || '</tr></thead><tbody>' || v_rows || '</tbody></table></div></section>';
+    || '</tr></thead><tbody>' || v_rows || '</tbody></table></div><a class="back-to-top" href="#top">Back to top</a></section>';
 
   SELECT coalesce(string_agg(format('<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td class="query">%s</td></tr>',
       snapshot_id,dba_mon._html_escape(component),dba_mon._html_escape(status),coalesce(row_count::text,''),
@@ -623,7 +672,7 @@ BEGIN
   FROM dba_mon.capture_component WHERE snapshot_id IN (p_begin_snapshot_id,p_end_snapshot_id);
   v_html := v_html || '<section><h2>Capture Diagnostics</h2><div class="table-wrap"><table><thead><tr>'
     || '<th>Snapshot</th><th>Component</th><th>Status</th><th>Rows</th><th>Message</th>'
-    || '</tr></thead><tbody>' || v_rows || '</tbody></table></div></section>'
+    || '</tr></thead><tbody>' || v_rows || '</tbody></table></div><a class="back-to-top" href="#top">Back to top</a></section>'
     || format('<footer>Generated at %s by postgres-awr %s. Deltas are valid only where counters and reset markers are stable.</footer>',
        clock_timestamp(),dba_mon._html_escape(i.collector_version))
     || '</main></body></html>';
@@ -642,5 +691,6 @@ REVOKE ALL ON FUNCTION dba_mon.report_bgwriter_delta(bigint, bigint) FROM PUBLIC
 REVOKE ALL ON FUNCTION dba_mon.report_archiver_delta(bigint, bigint) FROM PUBLIC;
 REVOKE ALL ON FUNCTION dba_mon.report_io_delta(bigint, bigint) FROM PUBLIC;
 REVOKE ALL ON FUNCTION dba_mon.report_table_delta(bigint, bigint) FROM PUBLIC;
+REVOKE ALL ON FUNCTION dba_mon.report_vacuum_delta(bigint, bigint) FROM PUBLIC;
 REVOKE ALL ON FUNCTION dba_mon.report_index_delta(bigint, bigint) FROM PUBLIC;
 REVOKE ALL ON FUNCTION dba_mon.generate_html_report(bigint, bigint) FROM PUBLIC;

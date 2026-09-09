@@ -450,6 +450,7 @@ Available report APIs:
 - `report_archiver_delta(begin_id,end_id)`
 - `report_io_delta(begin_id,end_id)`
 - `report_table_delta(begin_id,end_id)`
+- `report_vacuum_delta(begin_id,end_id)`
 - `report_index_delta(begin_id,end_id)`
 - `generate_html_report(begin_id,end_id)`
 
@@ -466,6 +467,7 @@ GRANT EXECUTE ON FUNCTION dba_mon.report_bgwriter_delta(bigint,bigint) TO dba_mo
 GRANT EXECUTE ON FUNCTION dba_mon.report_archiver_delta(bigint,bigint) TO dba_mon_reader;
 GRANT EXECUTE ON FUNCTION dba_mon.report_io_delta(bigint,bigint) TO dba_mon_reader;
 GRANT EXECUTE ON FUNCTION dba_mon.report_table_delta(bigint,bigint) TO dba_mon_reader;
+GRANT EXECUTE ON FUNCTION dba_mon.report_vacuum_delta(bigint,bigint) TO dba_mon_reader;
 GRANT EXECUTE ON FUNCTION dba_mon.report_index_delta(bigint,bigint) TO dba_mon_reader;
 GRANT EXECUTE ON FUNCTION dba_mon.generate_html_report(bigint,bigint) TO dba_mon_reader;
 ```

@@ -16,6 +16,10 @@ SELECT * FROM dba_mon.report_quality(:begin_snap::bigint,:end_snap::bigint)
 ORDER BY severity,check_name;
 SELECT count(*) AS pgss_delta_rows
 FROM dba_mon.report_pgss_delta(:begin_snap::bigint,:end_snap::bigint);
+SELECT count(*) AS vacuum_delta_rows
+FROM dba_mon.report_vacuum_delta(:begin_snap::bigint,:end_snap::bigint);
+SELECT count(*) AS index_delta_rows
+FROM dba_mon.report_index_delta(:begin_snap::bigint,:end_snap::bigint);
 
 WITH h AS (
   SELECT dba_mon.generate_html_report(
