@@ -363,7 +363,7 @@ account. Replace `/opt/Postgres-AWR` and `/usr/bin/psql` with the actual paths:
 ```
 
 Linux cron does not schedule below one minute. `wait_sampler.sql` therefore
-calls `capture_wait_samples(6,10)`, which captures internally at 0, 10, 20, 30,
+calls `capture_wait_samples(6,10::numeric)`, which captures internally at 0, 10, 20, 30,
 40 and 50 seconds. An advisory lock prevents overlapping minute runners. Each
 sample groups active backends only by `wait_event_type` and `wait_event`;
 active backends without a wait event are recorded as `CPU / CPU`. Detailed
