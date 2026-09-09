@@ -1,5 +1,5 @@
 \set ON_ERROR_STOP on
-\echo 'Installing postgres-awr 1.0.3'
+\echo 'Installing postgres-awr 1.0.4'
 
 BEGIN;
 
@@ -87,7 +87,7 @@ CREATE TABLE IF NOT EXISTS dba_mon.snapshot (
   completed_at timestamptz,
   status text NOT NULL DEFAULT 'RUNNING'
     CHECK (status IN ('RUNNING','SUCCESS','PARTIAL','FAILED')),
-  collector_version text NOT NULL DEFAULT '1.0.3',
+  collector_version text NOT NULL DEFAULT '1.0.4',
   server_version_num integer NOT NULL,
   server_version text NOT NULL,
   system_identifier numeric(20,0),
@@ -344,7 +344,7 @@ CREATE TABLE IF NOT EXISTS dba_mon.index_snap (
 );
 
 INSERT INTO dba_mon.schema_version(version, description)
-VALUES ('1.0.3', 'PostgreSQL 17/18 checkpointer compatibility and shared database row')
+VALUES ('1.0.4', 'Atomic upgrade ordering and PostgreSQL 17/18 catalog compatibility')
 ON CONFLICT (version) DO NOTHING;
 
 COMMIT;
