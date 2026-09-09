@@ -44,6 +44,7 @@ DECLARE
   v_db dba_mon.database_target%ROWTYPE;
   v_conn text;
   v_sql text;
+  v_dblink_schema name;
   v_failures integer := 0;
 BEGIN
   IF NOT pg_try_advisory_xact_lock(hashtextextended('dba_mon.capture_snapshot', 0)) THEN
@@ -53,6 +54,11 @@ BEGIN
   SELECT * INTO STRICT v_cluster
   FROM dba_mon.cluster_target
   WHERE enabled AND is_local AND (p_cluster_id IS NULL OR cluster_id=p_cluster_id);
+
+  SELECT n.nspname INTO STRICT v_dblink_schema
+  FROM pg_extension AS e
+  JOIN pg_namespace AS n ON n.oid = e.extnamespace
+  WHERE e.extname = 'dblink';
 
   INSERT INTO dba_mon.snapshot(
     cluster_id, server_version_num, server_version, system_identifier,
@@ -245,7 +251,7 @@ BEGIN
         v_sql := format($q$
           INSERT INTO dba_mon.pgss_snap
           SELECT %s, %s, *
-          FROM dblink(%L, $remote$
+          FROM %I.dblink(%L::text, $remote$
             SELECT userid, dbid, toplevel, queryid, query, plans, total_plan_time,
                    calls, total_exec_time, rows, shared_blks_hit, shared_blks_read,
                    shared_blks_dirtied, shared_blks_written, local_blks_hit,
@@ -254,7 +260,7 @@ BEGIN
                    shared_blk_write_time, local_blk_read_time, local_blk_write_time,
                    temp_blk_read_time, temp_blk_write_time, wal_records, wal_fpi, wal_bytes
             FROM pg_stat_statements
-          $remote$) AS x(
+          $remote$::text) AS x(
             userid oid, dbid oid, toplevel boolean, queryid bigint, query text,
             plans bigint, total_plan_time float8, calls bigint, total_exec_time float8,
             rows bigint, shared_blks_hit bigint, shared_blks_read bigint,
@@ -264,7 +270,7 @@ BEGIN
             shared_blk_write_time float8, local_blk_read_time float8,
             local_blk_write_time float8, temp_blk_read_time float8,
             temp_blk_write_time float8, wal_records bigint, wal_fpi bigint, wal_bytes numeric)
-        $q$,v_snapshot,v_db.database_target_id,v_conn);
+        $q$,v_snapshot,v_db.database_target_id,v_dblink_schema,v_conn);
         EXECUTE v_sql; GET DIAGNOSTICS v_rows=ROW_COUNT;
         PERFORM dba_mon._component_end(v_snapshot,'pgss',v_db.database_target_id,'SUCCESS',v_rows);
       END IF;
@@ -281,7 +287,7 @@ BEGIN
         v_sql := format($q$
           INSERT INTO dba_mon.table_snap
           SELECT %s, %s, *
-          FROM dblink(%L, $remote$
+          FROM %I.dblink(%L::text, $remote$
             SELECT relid, schemaname, relname, seq_scan, seq_tup_read, idx_scan,
                    idx_tup_fetch, n_tup_ins, n_tup_upd, n_tup_del, n_tup_hot_upd,
                    n_live_tup, n_dead_tup, n_mod_since_analyze, last_vacuum,
@@ -289,7 +295,7 @@ BEGIN
                    autovacuum_count, analyze_count, autoanalyze_count,
                    pg_total_relation_size(relid)
             FROM pg_stat_user_tables
-          $remote$) AS x(
+          $remote$::text) AS x(
             relid oid, schemaname name, relname name, seq_scan bigint,
             seq_tup_read bigint, idx_scan bigint, idx_tup_fetch bigint,
             n_tup_ins bigint, n_tup_upd bigint, n_tup_del bigint,
@@ -299,22 +305,22 @@ BEGIN
             last_autoanalyze timestamptz, vacuum_count bigint,
             autovacuum_count bigint, analyze_count bigint,
             autoanalyze_count bigint, total_relation_size bigint)
-        $q$,v_snapshot,v_db.database_target_id,v_conn);
+        $q$,v_snapshot,v_db.database_target_id,v_dblink_schema,v_conn);
         EXECUTE v_sql; GET DIAGNOSTICS v_rows=ROW_COUNT;
 
         v_sql := format($q$
           INSERT INTO dba_mon.index_snap
           SELECT %s, %s, *
-          FROM dblink(%L, $remote$
+          FROM %I.dblink(%L::text, $remote$
             SELECT indexrelid, relid, schemaname, relname, indexrelname,
                    idx_scan, last_idx_scan, idx_tup_read, idx_tup_fetch,
                    pg_relation_size(indexrelid)
             FROM pg_stat_user_indexes
-          $remote$) AS x(
+          $remote$::text) AS x(
             indexrelid oid, relid oid, schemaname name, relname name,
             indexrelname name, idx_scan bigint, last_idx_scan timestamptz,
             idx_tup_read bigint, idx_tup_fetch bigint, index_size bigint)
-        $q$,v_snapshot,v_db.database_target_id,v_conn);
+        $q$,v_snapshot,v_db.database_target_id,v_dblink_schema,v_conn);
         EXECUTE v_sql;
         PERFORM dba_mon._component_end(v_snapshot,'objects',v_db.database_target_id,'SUCCESS',v_rows);
       END IF;
