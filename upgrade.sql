@@ -1,5 +1,5 @@
 \set ON_ERROR_STOP on
-\echo 'Upgrading postgres-awr to 1.0.2'
+\echo 'Upgrading postgres-awr to 1.0.3'
 
 BEGIN;
 
@@ -38,11 +38,17 @@ CREATE TABLE IF NOT EXISTS dba_mon.system_snap (
   database_bytes numeric NOT NULL
 );
 
+ALTER TABLE dba_mon.database_snap
+  ALTER COLUMN datname DROP NOT NULL;
+
+ALTER TABLE dba_mon.checkpointer_snap
+  ALTER COLUMN num_done DROP NOT NULL;
+
 ALTER TABLE dba_mon.snapshot
-  ALTER COLUMN collector_version SET DEFAULT '1.0.2';
+  ALTER COLUMN collector_version SET DEFAULT '1.0.3';
 
 INSERT INTO dba_mon.schema_version(version, description)
-VALUES ('1.0.2', 'Reliable component failure recording')
+VALUES ('1.0.3', 'PostgreSQL 17/18 checkpointer compatibility and shared database row')
 ON CONFLICT (version) DO NOTHING;
 
 COMMIT;
