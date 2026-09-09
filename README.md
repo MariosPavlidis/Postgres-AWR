@@ -81,12 +81,179 @@ createdb postgres_monitoring
 psql -X -v ON_ERROR_STOP=1 -d postgres_monitoring -f install.sql
 ```
 
-Register the local cluster and databases:
+## Mandatory target configuration
+
+Installation creates repository objects but does not automatically select
+application databases. Before database-level statistics can be collected, add:
+
+1. exactly one local `cluster_target` row for this PostgreSQL instance; and
+2. one enabled `database_target` row for every database to monitor.
+
+Without `database_target` rows, cluster-wide components still succeed, but
+`pgss_snap`, `table_snap`, `index_snap`, and `v_pgss_delta` remain empty.
+
+### 1. Register the local PostgreSQL instance
 
 ```sql
 INSERT INTO dba_mon.cluster_target(cluster_name)
 VALUES ('prod-cluster-01')
+ON CONFLICT (cluster_name) DO NOTHING
 RETURNING cluster_id;
+```
+
+Confirm the cluster identifier:
+
+```sql
+SELECT cluster_id, cluster_name, enabled, is_local
+FROM dba_mon.cluster_target;
+```
+
+`cluster_target` means one PostgreSQL data directory/instance. It does not
+require Patroni, replication, or any other HA technology.
+
+### 2. List databases that can be monitored
+
+```sql
+SELECT datname
+FROM pg_database
+WHERE datallowconn
+  AND NOT datistemplate
+ORDER BY datname;
+```
+
+Do not register template databases. Register only databases whose workload and
+objects are required in reports.
+
+### 3. Enable `pg_stat_statements` in each target database
+
+Connect to each selected database and run:
+
+```sql
+CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
+SELECT count(*) AS tracked_statements FROM pg_stat_statements;
+```
+
+Creating the extension is database-scoped even though its statistics are held
+in shared memory at the PostgreSQL-instance level.
+
+### 4. Register one database target
+
+For a local database where PostgreSQL's normal local authentication works for
+the monitoring procedure owner, `service_name` may be left null:
+
+```sql
+INSERT INTO dba_mon.database_target
+  (cluster_id, database_name, service_name, collect_pgss, collect_objects)
+SELECT cluster_id, 'appdb', NULL, true, true
+FROM dba_mon.cluster_target
+WHERE enabled AND is_local
+ON CONFLICT (cluster_id, database_name) DO UPDATE
+SET enabled = true,
+    collect_pgss = EXCLUDED.collect_pgss,
+    collect_objects = EXCLUDED.collect_objects;
+```
+
+Replace `appdb` with the real application database name. Repeat the statement
+for every database to monitor.
+
+The resulting connection is equivalent to `dbname=appdb connect_timeout=5`.
+If local authentication does not allow that connection, use the recommended
+service-based configuration below.
+
+### 5. Recommended service-based target
+
+Define a service on the PostgreSQL database server:
+
+```ini
+[prod_appdb_monitor]
+host=/var/run/postgresql
+port=5432
+dbname=appdb
+user=dba_mon_collector
+application_name=postgres-awr
+connect_timeout=5
+```
+
+On Windows, replace the Unix socket with the server address, for example
+`host=127.0.0.1`. Add authentication through a protected passfile; do not put a
+password in `database_target.service_name`.
+
+Register or update the target:
+
+```sql
+INSERT INTO dba_mon.database_target
+  (cluster_id, database_name, service_name, collect_pgss, collect_objects)
+SELECT cluster_id, 'appdb', 'prod_appdb_monitor', true, true
+FROM dba_mon.cluster_target
+WHERE enabled AND is_local
+ON CONFLICT (cluster_id, database_name) DO UPDATE
+SET service_name = EXCLUDED.service_name,
+    enabled = true,
+    collect_pgss = EXCLUDED.collect_pgss,
+    collect_objects = EXCLUDED.collect_objects;
+```
+
+### 6. Verify target registration
+
+```sql
+SELECT database_target_id, cluster_id, database_name, service_name,
+       enabled, collect_pgss, collect_objects
+FROM dba_mon.database_target
+ORDER BY database_target_id;
+```
+
+At least one enabled row with `collect_pgss = true` is required for SQL deltas.
+
+### 7. Test the target connection before capture
+
+For a target without a service:
+
+```sql
+SELECT *
+FROM dblink(
+  'dbname=appdb connect_timeout=5',
+  'SELECT current_database(), current_user, count(*) FROM pg_stat_statements'
+) AS t(database_name name, login_name name, tracked_statements bigint);
+```
+
+For a service-based target:
+
+```sql
+SELECT *
+FROM dblink(
+  'service=prod_appdb_monitor connect_timeout=5',
+  'SELECT current_database(), current_user, count(*) FROM pg_stat_statements'
+) AS t(database_name name, login_name name, tracked_statements bigint);
+```
+
+This must return one row. Resolve authentication, service-file, extension, or
+privilege errors before scheduling snapshots.
+
+### Multiple database example
+
+Each database requires its own service because a libpq service selects one
+database:
+
+```sql
+INSERT INTO dba_mon.database_target
+  (cluster_id,database_name,service_name)
+SELECT cluster_id, v.database_name, v.service_name
+FROM dba_mon.cluster_target
+CROSS JOIN (VALUES
+  ('appdb'::name,   'prod_appdb_monitor'::text),
+  ('orders'::name,  'prod_orders_monitor'::text),
+  ('reporting'::name,'prod_reporting_monitor'::text)
+) AS v(database_name, service_name)
+WHERE enabled AND is_local
+ON CONFLICT (cluster_id, database_name) DO UPDATE
+SET service_name = EXCLUDED.service_name,
+    enabled = true;
+```
+
+The older hard-coded form below is equivalent but requires you to know the
+actual `cluster_id`:
+
+```sql
 
 INSERT INTO dba_mon.database_target
   (cluster_id,database_name,service_name)
