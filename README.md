@@ -1,4 +1,4 @@
-# postgres-awr 1.0.5
+# postgres-awr 1.0.6
 
 SQL-only, centralized PostgreSQL monitoring repository for PostgreSQL 17 and 18.
 It is AWR-inspired; it is not an Oracle AWR clone and does not use undocumented
@@ -208,6 +208,22 @@ ORDER BY database_target_id;
 
 At least one enabled row with `collect_pgss = true` is required for SQL deltas.
 
+`pg_stat_statements` stores instance-wide statistics and identifies the source
+database with `dbid`. The collector filters every target to the OID of the
+database reached by that target, so application SQL is not duplicated across
+database targets.
+
+If the repository database itself is registered so its tables and indexes can
+be monitored, normally disable SQL capture for it. This prevents snapshot and
+repository-management statements from appearing in workload reports:
+
+```sql
+UPDATE dba_mon.database_target
+SET collect_pgss = false,
+    collect_objects = true
+WHERE database_name = 'postgres_monitoring';
+```
+
 ### 7. Test the target connection before capture
 
 For a target without a service:
@@ -405,7 +421,7 @@ Expected results:
 
 - server version is 17.x or 18.x;
 - both extensions are returned;
-- schema version `1.0.5` is returned;
+- schema version `1.0.6` is returned;
 - `pgss_info_source` returns exactly one row;
 - `pg_stat_statements` appears in `shared_preload_libraries`.
 
@@ -538,7 +554,7 @@ ORDER BY snapshot_id DESC
 LIMIT 10;
 ```
 
-Version 1.0.5 records these markers but `v_pgss_delta` does not yet enforce all
+Version 1.0.6 records these markers but `v_pgss_delta` does not yet enforce all
 of them. Consumers must exclude reset/restart-crossing intervals.
 
 ### 7. Test retention (non-production)
@@ -576,7 +592,7 @@ The installation is ready for scheduling only when:
 - SQL delta rows exist only when both endpoints contain the statement and its
   counters did not decrease.
 - A PostgreSQL restart or statistics reset must split report intervals. Version
-  1.0.5 records these markers, but consumers must compare them before using
+  1.0.6 records these markers, but consumers must compare them before using
   cumulative deltas.
 - The repository captures all `pg_stat_statements` rows. Top-N belongs in the
   report layer, eliminating endpoint-selection bias.
