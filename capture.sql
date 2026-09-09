@@ -156,10 +156,21 @@ BEGIN
 
   BEGIN
     PERFORM dba_mon._component_begin(v_snapshot, 'checkpointer');
-    INSERT INTO dba_mon.checkpointer_snap
-    SELECT v_snapshot, num_timed, num_requested, num_done, restartpoints_timed,
-           restartpoints_requested, restartpoints_done, write_time, sync_time,
-           buffers_written, stats_reset FROM pg_stat_checkpointer;
+    IF current_setting('server_version_num')::integer >= 180000 THEN
+      EXECUTE format($sql$
+        INSERT INTO dba_mon.checkpointer_snap
+        SELECT %s, num_timed, num_requested, num_done, restartpoints_timed,
+               restartpoints_req, restartpoints_done, write_time, sync_time,
+               buffers_written, stats_reset
+        FROM pg_stat_checkpointer
+      $sql$, v_snapshot);
+    ELSE
+      INSERT INTO dba_mon.checkpointer_snap
+      SELECT v_snapshot, num_timed, num_requested, NULL::bigint,
+             restartpoints_timed, restartpoints_req, restartpoints_done,
+             write_time, sync_time, buffers_written, stats_reset
+      FROM pg_stat_checkpointer;
+    END IF;
     GET DIAGNOSTICS v_rows = ROW_COUNT;
     PERFORM dba_mon._component_end(v_snapshot,'checkpointer',NULL,'SUCCESS',v_rows);
   EXCEPTION WHEN OTHERS THEN
