@@ -1,14 +1,5 @@
 \set ON_ERROR_STOP on
-\pset tuples_only on
-\pset format unaligned
 
-SELECT pg_try_advisory_lock(hashtextextended('dba_mon.wait_sampler_runner',0)) AS acquired
-\gset
-
-\if :acquired
-CALL dba_mon.capture_wait_sample();
-\watch 10 5
-SELECT pg_advisory_unlock(hashtextextended('dba_mon.wait_sampler_runner',0));
-\else
-\echo 'wait sampler already running; skipped this minute'
-\endif
+-- Linux cron starts this file once per minute. The procedure takes six
+-- samples internally at 0, 10, 20, 30, 40 and 50 seconds.
+CALL dba_mon.capture_wait_samples(6,10);

@@ -44,3 +44,37 @@ END;
 $$;
 
 REVOKE ALL ON PROCEDURE dba_mon.capture_wait_sample() FROM PUBLIC;
+
+CREATE OR REPLACE PROCEDURE dba_mon.capture_wait_samples(
+  p_sample_count integer DEFAULT 6,
+  p_interval_seconds numeric DEFAULT 10
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, dba_mon
+AS $$
+DECLARE
+  v_sample integer;
+BEGIN
+  IF p_sample_count NOT BETWEEN 1 AND 60 THEN
+    RAISE EXCEPTION 'sample count must be between 1 and 60'
+      USING ERRCODE='22023';
+  END IF;
+  IF p_interval_seconds < 1 OR p_interval_seconds > 60 THEN
+    RAISE EXCEPTION 'sample interval must be between 1 and 60 seconds'
+      USING ERRCODE='22023';
+  END IF;
+  IF NOT pg_try_advisory_xact_lock(hashtextextended('dba_mon.capture_wait_samples',0)) THEN
+    RETURN;
+  END IF;
+
+  FOR v_sample IN 1..p_sample_count LOOP
+    CALL dba_mon.capture_wait_sample();
+    IF v_sample < p_sample_count THEN
+      PERFORM pg_sleep(p_interval_seconds::double precision);
+    END IF;
+  END LOOP;
+END;
+$$;
+
+REVOKE ALL ON PROCEDURE dba_mon.capture_wait_samples(integer,numeric) FROM PUBLIC;

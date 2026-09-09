@@ -8,6 +8,8 @@ FROM dba_mon.database_target ORDER BY database_name;
 SELECT to_regprocedure('dba_mon.generate_html_report(bigint,bigint)')
   AS html_report_function;
 SELECT to_regprocedure('dba_mon.capture_wait_sample()') AS wait_sampler_procedure;
+SELECT to_regprocedure('dba_mon.capture_wait_samples(integer,numeric)')
+  AS wait_sampler_runner_procedure;
 
 CALL dba_mon.capture_snapshot();
 CALL dba_mon.capture_wait_sample();
