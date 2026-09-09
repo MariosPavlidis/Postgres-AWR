@@ -1,5 +1,5 @@
 \set ON_ERROR_STOP on
-\echo 'Installing postgres-awr 1.0.5'
+\echo 'Installing postgres-awr 1.0.6'
 
 BEGIN;
 
@@ -87,7 +87,7 @@ CREATE TABLE IF NOT EXISTS dba_mon.snapshot (
   completed_at timestamptz,
   status text NOT NULL DEFAULT 'RUNNING'
     CHECK (status IN ('RUNNING','SUCCESS','PARTIAL','FAILED')),
-  collector_version text NOT NULL DEFAULT '1.0.5',
+  collector_version text NOT NULL DEFAULT '1.0.6',
   server_version_num integer NOT NULL,
   server_version text NOT NULL,
   system_identifier numeric(20,0),
@@ -344,7 +344,7 @@ CREATE TABLE IF NOT EXISTS dba_mon.index_snap (
 );
 
 INSERT INTO dba_mon.schema_version(version, description)
-VALUES ('1.0.5', 'Extension-schema-safe dblink collection')
+VALUES ('1.0.6', 'Database-scoped pg_stat_statements capture')
 ON CONFLICT (version) DO NOTHING;
 
 COMMIT;
