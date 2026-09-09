@@ -1,5 +1,5 @@
 \set ON_ERROR_STOP on
-\echo 'Upgrading postgres-awr to 1.0.3'
+\echo 'Upgrading postgres-awr to 1.0.4'
 
 BEGIN;
 
@@ -45,13 +45,16 @@ ALTER TABLE dba_mon.checkpointer_snap
   ALTER COLUMN num_done DROP NOT NULL;
 
 ALTER TABLE dba_mon.snapshot
-  ALTER COLUMN collector_version SET DEFAULT '1.0.3';
+  ALTER COLUMN collector_version SET DEFAULT '1.0.4';
+
+-- Load all executable objects before recording the release version. Keeping
+-- these includes inside the transaction prevents a repository from claiming a
+-- new version when an adjacent deployment file is stale, missing, or invalid.
+\ir capture.sql
+\ir retention.sql
 
 INSERT INTO dba_mon.schema_version(version, description)
-VALUES ('1.0.3', 'PostgreSQL 17/18 checkpointer compatibility and shared database row')
+VALUES ('1.0.4', 'Atomic upgrade ordering and PostgreSQL 17/18 catalog compatibility')
 ON CONFLICT (version) DO NOTHING;
 
 COMMIT;
-
-\ir capture.sql
-\ir retention.sql
