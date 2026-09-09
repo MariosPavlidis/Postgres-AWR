@@ -1,5 +1,5 @@
 \set ON_ERROR_STOP on
-\echo 'Installing postgres-awr 1.0.2'
+\echo 'Installing postgres-awr 1.0.3'
 
 BEGIN;
 
@@ -87,7 +87,7 @@ CREATE TABLE IF NOT EXISTS dba_mon.snapshot (
   completed_at timestamptz,
   status text NOT NULL DEFAULT 'RUNNING'
     CHECK (status IN ('RUNNING','SUCCESS','PARTIAL','FAILED')),
-  collector_version text NOT NULL DEFAULT '1.0.2',
+  collector_version text NOT NULL DEFAULT '1.0.3',
   server_version_num integer NOT NULL,
   server_version text NOT NULL,
   system_identifier numeric(20,0),
@@ -136,7 +136,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_capture_component
 CREATE TABLE IF NOT EXISTS dba_mon.database_snap (
   snapshot_id bigint NOT NULL REFERENCES dba_mon.snapshot(snapshot_id) ON DELETE CASCADE,
   datid oid NOT NULL,
-  datname name NOT NULL,
+  datname name,
   xact_commit bigint NOT NULL,
   xact_rollback bigint NOT NULL,
   blks_read bigint NOT NULL,
@@ -233,7 +233,7 @@ CREATE TABLE IF NOT EXISTS dba_mon.checkpointer_snap (
   snapshot_id bigint PRIMARY KEY REFERENCES dba_mon.snapshot(snapshot_id) ON DELETE CASCADE,
   num_timed bigint NOT NULL,
   num_requested bigint NOT NULL,
-  num_done bigint NOT NULL,
+  num_done bigint,
   restartpoints_timed bigint NOT NULL,
   restartpoints_requested bigint NOT NULL,
   restartpoints_done bigint NOT NULL,
@@ -344,7 +344,7 @@ CREATE TABLE IF NOT EXISTS dba_mon.index_snap (
 );
 
 INSERT INTO dba_mon.schema_version(version, description)
-VALUES ('1.0.2', 'Reliable component failure recording')
+VALUES ('1.0.3', 'PostgreSQL 17/18 checkpointer compatibility and shared database row')
 ON CONFLICT (version) DO NOTHING;
 
 COMMIT;
