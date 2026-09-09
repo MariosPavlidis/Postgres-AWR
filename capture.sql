@@ -12,12 +12,27 @@ CREATE OR REPLACE FUNCTION dba_mon._component_end(
   p_snapshot_id bigint, p_component text, p_database_target_id bigint,
   p_status text, p_rows bigint DEFAULT NULL, p_state text DEFAULT NULL,
   p_message text DEFAULT NULL
-) RETURNS void LANGUAGE sql AS $$
+) RETURNS void LANGUAGE plpgsql SET search_path = pg_catalog, dba_mon AS $$
+BEGIN
   UPDATE dba_mon.capture_component
      SET completed_at = clock_timestamp(), status = $4, row_count = $5,
          error_sqlstate = $6, error_message = left($7, 4000)
    WHERE snapshot_id = $1 AND component = $2
      AND database_target_id IS NOT DISTINCT FROM $3;
+
+  -- An exception rolls back the component's RUNNING row together with the
+  -- failed collector statement. Preserve the failure instead of silently
+  -- leaving a PARTIAL snapshot with no FAILED component.
+  IF NOT FOUND THEN
+    INSERT INTO dba_mon.capture_component(
+      snapshot_id, component, database_target_id, started_at, completed_at,
+      status, row_count, error_sqlstate, error_message
+    ) VALUES (
+      $1, $2, $3, clock_timestamp(), clock_timestamp(),
+      $4, $5, $6, left($7, 4000)
+    );
+  END IF;
+END;
 $$;
 
 CREATE OR REPLACE PROCEDURE dba_mon.capture_snapshot(p_cluster_id bigint DEFAULT NULL)
