@@ -340,13 +340,33 @@ SELECT cron.schedule(
 );
 SELECT cron.schedule(
   'postgres-awr-purge',
-  '17 2 * * *',
+  '0 1 * * *',
   $$CALL dba_mon.purge_snapshots()$$
 );
 ```
 
 If `pg_cron` is not approved, invoke the same calls from a systemd timer or the
 enterprise scheduler. Do not run concurrent collectors.
+
+For Linux `crontab`, install all three jobs under the PostgreSQL operating-system
+account. Replace `/opt/Postgres-AWR` and `/usr/bin/psql` with the actual paths:
+
+```cron
+# Main snapshot every 10 minutes
+*/10 * * * * /usr/bin/psql -X -v ON_ERROR_STOP=1 -d postgres_monitoring -c "CALL dba_mon.capture_snapshot();" >> /var/log/postgresql/postgres-awr-capture.log 2>&1
+
+# Active-session wait sampling every 10 seconds
+* * * * * /usr/bin/psql -X -v ON_ERROR_STOP=1 -d postgres_monitoring -f /opt/Postgres-AWR/wait_sampler.sql >> /var/log/postgresql/postgres-awr-waits.log 2>&1
+
+# Snapshot and detailed-sample retention purge every night at 01:00
+0 1 * * * /usr/bin/psql -X -v ON_ERROR_STOP=1 -d postgres_monitoring -c "CALL dba_mon.purge_snapshots();" >> /var/log/postgresql/postgres-awr-purge.log 2>&1
+```
+
+`wait_sampler.sql` captures immediately and then five more times at ten-second
+intervals. A session advisory lock prevents overlapping minute runners. Each
+sample groups active backends only by `wait_event_type` and `wait_event`;
+active backends without a wait event are recorded as `CPU / CPU`. Detailed
+samples use `detail_retention` and are purged by `purge_snapshots()`.
 
 ## Security grants
 
@@ -361,6 +381,8 @@ ALTER DEFAULT PRIVILEGES FOR ROLE dba_mon_owner IN SCHEMA dba_mon
 
 GRANT USAGE ON SCHEMA dba_mon TO dba_mon_collector;
 GRANT EXECUTE ON PROCEDURE dba_mon.capture_snapshot(bigint)
+  TO dba_mon_collector;
+GRANT EXECUTE ON PROCEDURE dba_mon.capture_wait_sample()
   TO dba_mon_collector;
 GRANT EXECUTE ON PROCEDURE dba_mon.purge_snapshots(bigint)
   TO dba_mon_collector;
@@ -452,6 +474,8 @@ Available report APIs:
 - `report_table_delta(begin_id,end_id)`
 - `report_vacuum_delta(begin_id,end_id)`
 - `report_index_delta(begin_id,end_id)`
+- `report_wait_summary(begin_id,end_id)`
+- `report_wait_chart(begin_id,end_id)`
 - `generate_html_report(begin_id,end_id)`
 
 Grant report execution to the read-only role after installation or upgrade:
@@ -469,6 +493,8 @@ GRANT EXECUTE ON FUNCTION dba_mon.report_io_delta(bigint,bigint) TO dba_mon_read
 GRANT EXECUTE ON FUNCTION dba_mon.report_table_delta(bigint,bigint) TO dba_mon_reader;
 GRANT EXECUTE ON FUNCTION dba_mon.report_vacuum_delta(bigint,bigint) TO dba_mon_reader;
 GRANT EXECUTE ON FUNCTION dba_mon.report_index_delta(bigint,bigint) TO dba_mon_reader;
+GRANT EXECUTE ON FUNCTION dba_mon.report_wait_summary(bigint,bigint) TO dba_mon_reader;
+GRANT EXECUTE ON FUNCTION dba_mon.report_wait_chart(bigint,bigint) TO dba_mon_reader;
 GRANT EXECUTE ON FUNCTION dba_mon.generate_html_report(bigint,bigint) TO dba_mon_reader;
 ```
 

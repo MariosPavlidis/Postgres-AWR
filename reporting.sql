@@ -105,6 +105,15 @@ AS $$
              THEN 'pg_stat_statements reset marker changed between endpoints'
              ELSE 'pg_stat_statements reset marker is stable' END FROM i
     UNION ALL
+    SELECT CASE WHEN actual_samples>=greatest(1,floor(interval_seconds/10)*0.8) THEN 'OK' ELSE 'WARNING' END,
+           'wait_sampling_coverage',format('%s of approximately %s expected ten-second samples captured',
+             actual_samples,greatest(1,floor(interval_seconds/10)))
+    FROM i CROSS JOIN LATERAL (
+      SELECT count(DISTINCT sampled_at) actual_samples
+      FROM dba_mon.wait_sample w
+      WHERE w.cluster_id=i.cluster_id AND w.sampled_at>=i.begin_time AND w.sampled_at<=i.end_time
+    ) ws
+    UNION ALL
     SELECT 'ERROR', 'failed_component',
            format('Snapshot %s component %s target %s failed: %s',
              cc.snapshot_id, cc.component,
@@ -431,6 +440,131 @@ AS $$
    AND e.idx_tup_fetch>=b.idx_tup_fetch;
 $$;
 
+CREATE OR REPLACE FUNCTION dba_mon.report_wait_summary(
+  p_begin_snapshot_id bigint, p_end_snapshot_id bigint
+) RETURNS TABLE (wait_event_type text, wait_event text, sample_count bigint,
+  blocked_sample_count bigint, average_active_sessions numeric,
+  maximum_active_sessions integer, first_sample timestamptz, last_sample timestamptz)
+LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path = pg_catalog, dba_mon
+AS $$
+ WITH i AS (SELECT * FROM dba_mon.report_interval($1,$2)),
+ ticks AS (
+   SELECT count(DISTINCT w.sampled_at)::numeric tick_count
+   FROM dba_mon.wait_sample w JOIN i ON i.cluster_id=w.cluster_id
+   WHERE w.sampled_at>=i.begin_time AND w.sampled_at<=i.end_time
+ )
+ SELECT w.wait_event_type,w.wait_event,sum(w.session_count),
+        sum(w.blocked_session_count),
+        round(sum(w.session_count)::numeric/nullif(ticks.tick_count,0),3),
+        max(w.session_count),min(w.sampled_at),max(w.sampled_at)
+ FROM dba_mon.wait_sample w JOIN i ON i.cluster_id=w.cluster_id CROSS JOIN ticks
+ WHERE w.sampled_at>=i.begin_time AND w.sampled_at<=i.end_time
+   AND w.session_count>0
+ GROUP BY w.wait_event_type,w.wait_event,ticks.tick_count;
+$$;
+
+CREATE OR REPLACE FUNCTION dba_mon.report_wait_chart(
+  p_begin_snapshot_id bigint, p_end_snapshot_id bigint
+) RETURNS text
+LANGUAGE plpgsql STABLE SECURITY DEFINER
+SET search_path = pg_catalog, dba_mon
+AS $$
+DECLARE
+  i record;
+  v_max integer;
+  v_areas text;
+  v_legend text;
+BEGIN
+  SELECT * INTO STRICT i
+  FROM dba_mon.report_interval(p_begin_snapshot_id,p_end_snapshot_id);
+
+  SELECT max(total_sessions)::integer INTO v_max
+  FROM (
+    SELECT sampled_at,sum(session_count) AS total_sessions
+    FROM dba_mon.wait_sample
+    WHERE cluster_id=i.cluster_id AND sampled_at>=i.begin_time AND sampled_at<=i.end_time
+    GROUP BY sampled_at
+  ) s;
+  IF coalesce(v_max,0)=0 THEN
+    RETURN '<div class="empty">No active-session samples were captured in this interval</div>';
+  END IF;
+
+  WITH RECURSIVE
+  raw AS (
+    SELECT date_bin(interval '10 seconds',w.sampled_at,timestamptz '2000-01-01') bucket,
+           w.wait_event_type||' / '||w.wait_event AS original_label,w.session_count
+    FROM dba_mon.wait_sample w
+    WHERE w.cluster_id=i.cluster_id AND w.sampled_at>=i.begin_time AND w.sampled_at<=i.end_time
+      AND w.session_count>0
+  ), ranked AS (
+    SELECT original_label,row_number() OVER (ORDER BY sum(session_count) DESC,original_label) rn
+    FROM raw GROUP BY original_label
+  ), mapped AS (
+    SELECT r.bucket,CASE WHEN k.rn<=7 THEN r.original_label ELSE 'Other' END label,
+           CASE WHEN k.rn<=7 THEN k.rn ELSE 8 END rank,sum(r.session_count)::integer sessions
+    FROM raw r JOIN ranked k USING (original_label)
+    GROUP BY r.bucket,CASE WHEN k.rn<=7 THEN r.original_label ELSE 'Other' END,
+             CASE WHEN k.rn<=7 THEN k.rn ELSE 8 END
+  ), categories AS (
+    SELECT label,min(rank)::integer rank FROM mapped GROUP BY label
+  ), buckets AS (
+    SELECT generate_series(
+      date_bin(interval '10 seconds',i.begin_time,timestamptz '2000-01-01'),
+      date_bin(interval '10 seconds',i.end_time,timestamptz '2000-01-01'),interval '10 seconds') bucket
+  ), grid AS (
+    SELECT b.bucket,c.label,c.rank,coalesce(m.sessions,0)::integer sessions
+    FROM buckets b CROSS JOIN categories c
+    LEFT JOIN mapped m ON m.bucket=b.bucket AND m.label=c.label
+  ), stacked AS (
+    SELECT *,coalesce(sum(sessions) OVER (PARTITION BY bucket ORDER BY rank
+      ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING),0)::numeric lower_value,
+      sum(sessions) OVER (PARTITION BY bucket ORDER BY rank ROWS UNBOUNDED PRECEDING)::numeric upper_value
+    FROM grid
+  ), coords AS (
+    SELECT *,55+795*extract(epoch FROM bucket-i.begin_time)/nullif(i.interval_seconds,0) x,
+      245-210*upper_value/v_max y_upper,245-210*lower_value/v_max y_lower
+    FROM stacked
+  ), polygons AS (
+    SELECT label,rank,
+      string_agg(round(x::numeric,1)||','||round(y_upper::numeric,1),' ' ORDER BY bucket)
+      ||' '||string_agg(round(x::numeric,1)||','||round(y_lower::numeric,1),' ' ORDER BY bucket DESC) points
+    FROM coords GROUP BY label,rank
+  )
+  SELECT string_agg(format('<polygon points="%s" fill="%s" fill-opacity="0.82"><title>%s</title></polygon>',
+    points,CASE rank WHEN 1 THEN '#2563eb' WHEN 2 THEN '#16a34a' WHEN 3 THEN '#f59e0b'
+    WHEN 4 THEN '#dc2626' WHEN 5 THEN '#7c3aed' WHEN 6 THEN '#0891b2'
+    WHEN 7 THEN '#db2777' ELSE '#94a3b8' END,dba_mon._html_escape(label)),' ' ORDER BY rank)
+  INTO v_areas FROM polygons;
+
+  WITH labels AS (
+    SELECT wait_event_type||' / '||wait_event label,sum(sample_count) total,
+           row_number() OVER (ORDER BY sum(sample_count) DESC,wait_event_type,wait_event) rn
+    FROM dba_mon.report_wait_summary(p_begin_snapshot_id,p_end_snapshot_id)
+    GROUP BY wait_event_type,wait_event
+  ), shown AS (
+    SELECT CASE WHEN rn<=7 THEN label ELSE 'Other' END label,
+           CASE WHEN rn<=7 THEN rn ELSE 8 END rank,sum(total) total
+    FROM labels GROUP BY CASE WHEN rn<=7 THEN label ELSE 'Other' END,
+      CASE WHEN rn<=7 THEN rn ELSE 8 END
+  )
+  SELECT string_agg(format('<rect x="870" y="%s" width="12" height="12" fill="%s"/>'
+    ||'<text x="888" y="%s" font-size="11">%s</text>',
+    28+(rank-1)*24,CASE rank WHEN 1 THEN '#2563eb' WHEN 2 THEN '#16a34a' WHEN 3 THEN '#f59e0b'
+    WHEN 4 THEN '#dc2626' WHEN 5 THEN '#7c3aed' WHEN 6 THEN '#0891b2'
+    WHEN 7 THEN '#db2777' ELSE '#94a3b8' END,39+(rank-1)*24,dba_mon._html_escape(label)),' ' ORDER BY rank)
+  INTO v_legend FROM shown;
+
+  RETURN format('<svg class="wait-chart" viewBox="0 0 1100 275" role="img" aria-label="Average active sessions by wait event">'
+    ||'<line x1="55" y1="35" x2="55" y2="245" stroke="#64748b"/>'
+    ||'<line x1="55" y1="245" x2="850" y2="245" stroke="#64748b"/>'
+    ||'<text x="8" y="40" font-size="11">%s</text><text x="35" y="249" font-size="11">0</text>'
+    ||'<text x="55" y="265" font-size="11">%s</text><text x="730" y="265" font-size="11">%s</text>'
+    ||'%s%s</svg>',v_max,dba_mon._html_escape(i.begin_time::text),
+    dba_mon._html_escape(i.end_time::text),v_areas,v_legend);
+END;
+$$;
+
 CREATE OR REPLACE FUNCTION dba_mon.generate_html_report(
   p_begin_snapshot_id bigint,
   p_end_snapshot_id bigint
@@ -480,6 +614,8 @@ BEGIN
     || '.sev-ERROR{color:var(--bad);font-weight:700}.sev-WARNING{color:var(--warn);font-weight:700}'
     || '.sev-OK{color:var(--ok)}.empty{color:var(--muted);padding:12px}'
     || '.back-to-top{display:block;margin:7px 2px 0;text-align:right;font-size:12px}footer{margin:30px 0;color:var(--muted)}'
+    || '.chart-wrap{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px}'
+    || '.wait-chart{display:block;width:100%;height:auto;min-height:260px}'
     || '@media print{body{background:#fff}main{max-width:none;padding:8px}.table-wrap{overflow:visible}'
     || 'th{position:static}section{break-inside:avoid}}'
     || '</style></head><body><main>'
@@ -541,6 +677,26 @@ BEGIN
       || format('<div class="card"><div class="label">Database size</div><div class="value">%s</div></div>',pg_size_pretty(r.database_bytes::bigint))
       || '</div></section>';
   END IF;
+
+  v_html := v_html || '<section><h2>Average Active Sessions by Wait Event</h2>'
+    || '<p class="sub">Ten-second samples. CPU represents active sessions without a PostgreSQL wait event.</p>'
+    || '<div class="chart-wrap">'
+    || dba_mon.report_wait_chart(p_begin_snapshot_id,p_end_snapshot_id)
+    || '</div></section>';
+
+  SELECT coalesce(string_agg(format('<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td>'
+      || '<td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>',
+      dba_mon._html_escape(wait_event_type),dba_mon._html_escape(wait_event),sample_count,
+      blocked_sample_count,average_active_sessions,maximum_active_sessions,
+      dba_mon._html_escape(first_sample::text),dba_mon._html_escape(last_sample::text)),''),
+      '<tr><td colspan="8" class="empty">No wait samples in this interval</td></tr>') INTO v_rows
+  FROM (SELECT * FROM dba_mon.report_wait_summary(p_begin_snapshot_id,p_end_snapshot_id)
+        ORDER BY sample_count DESC LIMIT 30) q;
+  v_html := v_html || '<section><h2>Wait Event Summary</h2><div class="table-wrap"><table><thead><tr>'
+    || '<th>Wait type</th><th>Wait event</th><th>Session samples</th><th>Blocked samples</th>'
+    || '<th>Average active</th><th>Maximum active</th><th>First sample</th><th>Last sample</th>'
+    || '</tr></thead><tbody>' || v_rows || '</tbody></table></div>'
+    || '<a class="back-to-top" href="#top">Back to top</a></section>';
 
   FOR v_metric,v_title IN VALUES
     ('total_exec_time_ms','Top SQL by Total Execution Time'),
@@ -693,4 +849,6 @@ REVOKE ALL ON FUNCTION dba_mon.report_io_delta(bigint, bigint) FROM PUBLIC;
 REVOKE ALL ON FUNCTION dba_mon.report_table_delta(bigint, bigint) FROM PUBLIC;
 REVOKE ALL ON FUNCTION dba_mon.report_vacuum_delta(bigint, bigint) FROM PUBLIC;
 REVOKE ALL ON FUNCTION dba_mon.report_index_delta(bigint, bigint) FROM PUBLIC;
+REVOKE ALL ON FUNCTION dba_mon.report_wait_summary(bigint, bigint) FROM PUBLIC;
+REVOKE ALL ON FUNCTION dba_mon.report_wait_chart(bigint, bigint) FROM PUBLIC;
 REVOKE ALL ON FUNCTION dba_mon.generate_html_report(bigint, bigint) FROM PUBLIC;

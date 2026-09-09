@@ -343,7 +343,21 @@ CREATE TABLE IF NOT EXISTS dba_mon.index_snap (
   PRIMARY KEY (snapshot_id, database_target_id, indexrelid)
 );
 
+CREATE TABLE IF NOT EXISTS dba_mon.wait_sample (
+  wait_sample_id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  cluster_id bigint NOT NULL REFERENCES dba_mon.cluster_target(cluster_id),
+  sampled_at timestamptz NOT NULL,
+  wait_event_type text NOT NULL,
+  wait_event text NOT NULL,
+  session_count integer NOT NULL CHECK (session_count >= 0),
+  blocked_session_count integer NOT NULL CHECK (blocked_session_count >= 0)
+);
+
+CREATE INDEX IF NOT EXISTS ix_wait_sample_time
+  ON dba_mon.wait_sample (cluster_id, sampled_at);
+
 \ir capture.sql
+\ir waits.sql
 \ir retention.sql
 \ir reporting.sql
 

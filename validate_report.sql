@@ -20,6 +20,10 @@ SELECT count(*) AS vacuum_delta_rows
 FROM dba_mon.report_vacuum_delta(:begin_snap::bigint,:end_snap::bigint);
 SELECT count(*) AS index_delta_rows
 FROM dba_mon.report_index_delta(:begin_snap::bigint,:end_snap::bigint);
+SELECT count(*) AS wait_summary_rows
+FROM dba_mon.report_wait_summary(:begin_snap::bigint,:end_snap::bigint);
+SELECT length(dba_mon.report_wait_chart(:begin_snap::bigint,:end_snap::bigint))
+  AS wait_chart_length;
 
 WITH h AS (
   SELECT dba_mon.generate_html_report(

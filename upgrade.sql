@@ -47,10 +47,24 @@ ALTER TABLE dba_mon.checkpointer_snap
 ALTER TABLE dba_mon.snapshot
   ALTER COLUMN collector_version SET DEFAULT '1.1.0';
 
+CREATE TABLE IF NOT EXISTS dba_mon.wait_sample (
+  wait_sample_id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  cluster_id bigint NOT NULL REFERENCES dba_mon.cluster_target(cluster_id),
+  sampled_at timestamptz NOT NULL,
+  wait_event_type text NOT NULL,
+  wait_event text NOT NULL,
+  session_count integer NOT NULL CHECK (session_count >= 0),
+  blocked_session_count integer NOT NULL CHECK (blocked_session_count >= 0)
+);
+
+CREATE INDEX IF NOT EXISTS ix_wait_sample_time
+  ON dba_mon.wait_sample (cluster_id, sampled_at);
+
 -- Load all executable objects before recording the release version. Keeping
 -- these includes inside the transaction prevents a repository from claiming a
 -- new version when an adjacent deployment file is stale, missing, or invalid.
 \ir capture.sql
+\ir waits.sql
 \ir retention.sql
 \ir reporting.sql
 
