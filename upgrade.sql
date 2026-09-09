@@ -1,5 +1,5 @@
 \set ON_ERROR_STOP on
-\echo 'Upgrading postgres-awr to 1.0.1'
+\echo 'Upgrading postgres-awr to 1.0.2'
 
 BEGIN;
 
@@ -39,10 +39,10 @@ CREATE TABLE IF NOT EXISTS dba_mon.system_snap (
 );
 
 ALTER TABLE dba_mon.snapshot
-  ALTER COLUMN collector_version SET DEFAULT '1.0.1';
+  ALTER COLUMN collector_version SET DEFAULT '1.0.2';
 
 INSERT INTO dba_mon.schema_version(version, description)
-VALUES ('1.0.1', 'Extension-schema-safe capture and system snapshot metrics')
+VALUES ('1.0.2', 'Reliable component failure recording')
 ON CONFLICT (version) DO NOTHING;
 
 COMMIT;
