@@ -260,6 +260,11 @@ BEGIN
                    shared_blk_write_time, local_blk_read_time, local_blk_write_time,
                    temp_blk_read_time, temp_blk_write_time, wal_records, wal_fpi, wal_bytes
             FROM pg_stat_statements
+            WHERE dbid = (
+              SELECT oid
+              FROM pg_database
+              WHERE datname = current_database()
+            )
           $remote$::text) AS x(
             userid oid, dbid oid, toplevel boolean, queryid bigint, query text,
             plans bigint, total_plan_time float8, calls bigint, total_exec_time float8,
