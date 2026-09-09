@@ -360,7 +360,8 @@ AS $$
         e.last_vacuum,e.last_autovacuum,e.last_analyze,e.last_autoanalyze
  FROM dba_mon.table_snap b JOIN dba_mon.table_snap e
    ON e.database_target_id=b.database_target_id AND e.relid=b.relid
- JOIN dba_mon.database_target dt USING(database_target_id)
+ JOIN dba_mon.database_target dt
+   ON dt.database_target_id=e.database_target_id
  WHERE b.snapshot_id=$1 AND e.snapshot_id=$2
    AND EXISTS (SELECT 1 FROM dba_mon.snapshot sb,dba_mon.snapshot se
                WHERE sb.snapshot_id=$1 AND se.snapshot_id=$2
@@ -388,7 +389,8 @@ AS $$
  FROM dba_mon.index_snap b JOIN dba_mon.index_snap e
    ON e.database_target_id=b.database_target_id
   AND e.indexrelid=b.indexrelid
- JOIN dba_mon.database_target dt USING(database_target_id)
+ JOIN dba_mon.database_target dt
+   ON dt.database_target_id=e.database_target_id
  WHERE b.snapshot_id=$1 AND e.snapshot_id=$2
    AND EXISTS (SELECT 1 FROM dba_mon.snapshot sb,dba_mon.snapshot se
                WHERE sb.snapshot_id=$1 AND se.snapshot_id=$2
