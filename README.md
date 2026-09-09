@@ -138,8 +138,10 @@ in shared memory at the PostgreSQL-instance level.
 
 ### 4. Register one database target
 
-For a local database where PostgreSQL's normal local authentication works for
-the monitoring procedure owner, `service_name` may be left null:
+For a database in the same PostgreSQL instance, leave `service_name` as `NULL`.
+This is the normal configuration for local database targets. The collector will
+connect using `dbname=<database_name> connect_timeout=<seconds>` and PostgreSQL's
+default local connection settings:
 
 ```sql
 INSERT INTO dba_mon.database_target
@@ -157,10 +159,12 @@ Replace `appdb` with the real application database name. Repeat the statement
 for every database to monitor.
 
 The resulting connection is equivalent to `dbname=appdb connect_timeout=5`.
-If local authentication does not allow that connection, use the recommended
-service-based configuration below.
+Do not create a service entry merely because the target is another database;
+PostgreSQL requires `dblink` for cross-database access even when both databases
+are local to the same instance. Configure `service_name` only when the target is
+remote or when local/default authentication cannot establish the connection.
 
-### 5. Recommended service-based target
+### 5. Service-based target when required
 
 Define a service on the PostgreSQL database server:
 
