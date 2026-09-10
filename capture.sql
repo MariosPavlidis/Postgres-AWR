@@ -358,7 +358,15 @@ FROM dba_mon.snapshot s JOIN dba_mon.cluster_target c USING(cluster_id);
 
 CREATE OR REPLACE VIEW dba_mon.v_pgss_delta AS
 WITH x AS (
- SELECT p.*, s.started_at,
+ SELECT p.snapshot_id, p.database_target_id, p.userid, p.dbid, p.toplevel,
+   p.queryid, p.query, p.plans, p.total_plan_time, p.calls,
+   p.total_exec_time, p.rows, p.shared_blks_hit, p.shared_blks_read,
+   p.shared_blks_dirtied, p.shared_blks_written, p.local_blks_hit,
+   p.local_blks_read, p.local_blks_dirtied, p.local_blks_written,
+   p.temp_blks_read, p.temp_blks_written, p.shared_blk_read_time,
+   p.shared_blk_write_time, p.local_blk_read_time, p.local_blk_write_time,
+   p.temp_blk_read_time, p.temp_blk_write_time, p.wal_records, p.wal_fpi,
+   p.wal_bytes, s.started_at,
    lag(snapshot_id) OVER w prev_snapshot_id,
    lag(started_at) OVER w prev_started_at,
    lag(calls) OVER w prev_calls,
