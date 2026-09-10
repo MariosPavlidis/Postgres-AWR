@@ -258,7 +258,8 @@ BEGIN
                    local_blks_read, local_blks_dirtied, local_blks_written,
                    temp_blks_read, temp_blks_written, shared_blk_read_time,
                    shared_blk_write_time, local_blk_read_time, local_blk_write_time,
-                   temp_blk_read_time, temp_blk_write_time, wal_records, wal_fpi, wal_bytes
+                   temp_blk_read_time, temp_blk_write_time, wal_records, wal_fpi, wal_bytes,
+                   min_exec_time, max_exec_time
             FROM pg_stat_statements
             WHERE dbid = (
               SELECT oid
@@ -274,7 +275,8 @@ BEGIN
             temp_blks_read bigint, temp_blks_written bigint, shared_blk_read_time float8,
             shared_blk_write_time float8, local_blk_read_time float8,
             local_blk_write_time float8, temp_blk_read_time float8,
-            temp_blk_write_time float8, wal_records bigint, wal_fpi bigint, wal_bytes numeric)
+            temp_blk_write_time float8, wal_records bigint, wal_fpi bigint, wal_bytes numeric,
+            min_exec_time float8, max_exec_time float8)
         $q$,v_snapshot,v_db.database_target_id,v_dblink_schema,v_conn);
         EXECUTE v_sql; GET DIAGNOSTICS v_rows=ROW_COUNT;
         PERFORM dba_mon._component_end(v_snapshot,'pgss',v_db.database_target_id,'SUCCESS',v_rows);

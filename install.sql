@@ -1,5 +1,5 @@
 \set ON_ERROR_STOP on
-\echo 'Installing postgres-awr 1.1.0'
+\echo 'Installing postgres-awr 1.1.1'
 
 BEGIN;
 
@@ -87,7 +87,7 @@ CREATE TABLE IF NOT EXISTS dba_mon.snapshot (
   completed_at timestamptz,
   status text NOT NULL DEFAULT 'RUNNING'
     CHECK (status IN ('RUNNING','SUCCESS','PARTIAL','FAILED')),
-  collector_version text NOT NULL DEFAULT '1.1.0',
+  collector_version text NOT NULL DEFAULT '1.1.1',
   server_version_num integer NOT NULL,
   server_version text NOT NULL,
   system_identifier numeric(20,0),
@@ -190,6 +190,8 @@ CREATE TABLE IF NOT EXISTS dba_mon.pgss_snap (
   wal_records bigint NOT NULL,
   wal_fpi bigint NOT NULL,
   wal_bytes numeric NOT NULL,
+  min_exec_time double precision NOT NULL,
+  max_exec_time double precision NOT NULL,
   PRIMARY KEY (snapshot_id, database_target_id, userid, dbid, toplevel, queryid)
 );
 CREATE INDEX IF NOT EXISTS ix_pgss_key_snapshot
@@ -362,7 +364,7 @@ CREATE INDEX IF NOT EXISTS ix_wait_sample_time
 \ir reporting.sql
 
 INSERT INTO dba_mon.schema_version(version, description)
-VALUES ('1.1.0', 'Snapshot interval APIs and self-contained HTML reports')
+VALUES ('1.1.1', 'Complete Top SQL rows, WAL, and execution-time metrics')
 ON CONFLICT (version) DO NOTHING;
 
 COMMIT;
