@@ -5,8 +5,14 @@ SELECT extname FROM pg_extension WHERE extname IN ('dblink','pg_stat_statements'
 SELECT cluster_id,cluster_name,enabled,is_local FROM dba_mon.cluster_target;
 SELECT database_target_id,database_name,enabled,collect_pgss,collect_objects
 FROM dba_mon.database_target ORDER BY database_name;
+SELECT to_regprocedure('dba_mon.generate_html_report(bigint,bigint)')
+  AS html_report_function;
+SELECT to_regprocedure('dba_mon.capture_wait_sample()') AS wait_sampler_procedure;
+SELECT to_regprocedure('dba_mon.capture_wait_samples(integer,numeric)')
+  AS wait_sampler_runner_procedure;
 
 CALL dba_mon.capture_snapshot();
+CALL dba_mon.capture_wait_sample();
 
 SELECT * FROM dba_mon.v_snapshot_health ORDER BY snapshot_id DESC LIMIT 1;
 SELECT component,database_target_id,status,row_count,error_sqlstate,error_message
@@ -22,4 +28,3 @@ BEGIN
       AND status='RUNNING'
   ) THEN RAISE EXCEPTION 'validation failed: unfinished components'; END IF;
 END $$;
-

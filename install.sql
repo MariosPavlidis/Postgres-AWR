@@ -1,5 +1,5 @@
 \set ON_ERROR_STOP on
-\echo 'Installing postgres-awr 1.0.6'
+\echo 'Installing postgres-awr 1.1.0'
 
 BEGIN;
 
@@ -87,7 +87,7 @@ CREATE TABLE IF NOT EXISTS dba_mon.snapshot (
   completed_at timestamptz,
   status text NOT NULL DEFAULT 'RUNNING'
     CHECK (status IN ('RUNNING','SUCCESS','PARTIAL','FAILED')),
-  collector_version text NOT NULL DEFAULT '1.0.6',
+  collector_version text NOT NULL DEFAULT '1.1.0',
   server_version_num integer NOT NULL,
   server_version text NOT NULL,
   system_identifier numeric(20,0),
@@ -343,11 +343,26 @@ CREATE TABLE IF NOT EXISTS dba_mon.index_snap (
   PRIMARY KEY (snapshot_id, database_target_id, indexrelid)
 );
 
+CREATE TABLE IF NOT EXISTS dba_mon.wait_sample (
+  wait_sample_id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  cluster_id bigint NOT NULL REFERENCES dba_mon.cluster_target(cluster_id),
+  sampled_at timestamptz NOT NULL,
+  wait_event_type text NOT NULL,
+  wait_event text NOT NULL,
+  session_count integer NOT NULL CHECK (session_count >= 0),
+  blocked_session_count integer NOT NULL CHECK (blocked_session_count >= 0)
+);
+
+CREATE INDEX IF NOT EXISTS ix_wait_sample_time
+  ON dba_mon.wait_sample (cluster_id, sampled_at);
+
+\ir capture.sql
+\ir waits.sql
+\ir retention.sql
+\ir reporting.sql
+
 INSERT INTO dba_mon.schema_version(version, description)
-VALUES ('1.0.6', 'Database-scoped pg_stat_statements capture')
+VALUES ('1.1.0', 'Snapshot interval APIs and self-contained HTML reports')
 ON CONFLICT (version) DO NOTHING;
 
 COMMIT;
-
-\ir capture.sql
-\ir retention.sql

@@ -1,4 +1,4 @@
-# postgres-awr 1.0.6
+# postgres-awr 1.1.0
 
 SQL-only, centralized PostgreSQL monitoring repository for PostgreSQL 17 and 18.
 It is AWR-inspired; it is not an Oracle AWR clone and does not use undocumented
@@ -22,7 +22,8 @@ This first release implements the repository and reliable snapshot foundation:
 - 30-day configurable snapshot retention
 - SQL deltas that reject statements whose `calls` counter decreased
 
-ASH sampling and full HTML reports are intentionally deferred to v1.1.
+Version 1.1 adds arbitrary-interval SQL APIs and self-contained HTML reports.
+ASH-style sampling remains deferred to a later release.
 
 ## Prerequisites
 
@@ -339,13 +340,34 @@ SELECT cron.schedule(
 );
 SELECT cron.schedule(
   'postgres-awr-purge',
-  '17 2 * * *',
+  '0 1 * * *',
   $$CALL dba_mon.purge_snapshots()$$
 );
 ```
 
 If `pg_cron` is not approved, invoke the same calls from a systemd timer or the
 enterprise scheduler. Do not run concurrent collectors.
+
+For Linux `crontab`, install all three jobs under the PostgreSQL operating-system
+account. Replace `/opt/Postgres-AWR` and `/usr/bin/psql` with the actual paths:
+
+```cron
+# Main snapshot every 10 minutes
+*/10 * * * * /usr/bin/psql -X -v ON_ERROR_STOP=1 -d postgres_monitoring -c "CALL dba_mon.capture_snapshot();" >> /var/log/postgresql/postgres-awr-capture.log 2>&1
+
+# Start the wait-sampling minute runner once per minute
+* * * * * /usr/bin/psql -X -v ON_ERROR_STOP=1 -d postgres_monitoring -f /opt/Postgres-AWR/wait_sampler.sql >> /var/log/postgresql/postgres-awr-waits.log 2>&1
+
+# Snapshot and detailed-sample retention purge every night at 01:00
+0 1 * * * /usr/bin/psql -X -v ON_ERROR_STOP=1 -d postgres_monitoring -c "CALL dba_mon.purge_snapshots();" >> /var/log/postgresql/postgres-awr-purge.log 2>&1
+```
+
+Linux cron does not schedule below one minute. `wait_sampler.sql` therefore
+calls `capture_wait_samples(6,10::numeric)`, which captures internally at 0, 10, 20, 30,
+40 and 50 seconds. An advisory lock prevents overlapping minute runners. Each
+sample groups active backends only by `wait_event_type` and `wait_event`;
+active backends without a wait event are recorded as `CPU / CPU`. Detailed
+samples use `detail_retention` and are purged by `purge_snapshots()`.
 
 ## Security grants
 
@@ -360,6 +382,10 @@ ALTER DEFAULT PRIVILEGES FOR ROLE dba_mon_owner IN SCHEMA dba_mon
 
 GRANT USAGE ON SCHEMA dba_mon TO dba_mon_collector;
 GRANT EXECUTE ON PROCEDURE dba_mon.capture_snapshot(bigint)
+  TO dba_mon_collector;
+GRANT EXECUTE ON PROCEDURE dba_mon.capture_wait_sample()
+  TO dba_mon_collector;
+GRANT EXECUTE ON PROCEDURE dba_mon.capture_wait_samples(integer,numeric)
   TO dba_mon_collector;
 GRANT EXECUTE ON PROCEDURE dba_mon.purge_snapshots(bigint)
   TO dba_mon_collector;
@@ -387,6 +413,92 @@ Run the smoke test in a non-production repository:
 
 ```bash
 psql -X -v ON_ERROR_STOP=1 -d postgres_monitoring -f validate.sql
+```
+
+## HTML interval reports
+
+Version 1.1 generates a self-contained HTML report between any two snapshots
+from the same cluster. Use successful endpoints that do not cross a PostgreSQL
+restart or statistics reset.
+
+List candidate endpoints:
+
+```sql
+SELECT snapshot_id,started_at,completed_at,status,error_count
+FROM dba_mon.snapshot
+ORDER BY snapshot_id DESC
+LIMIT 20;
+```
+
+Inspect the interval and quality checks before export:
+
+```sql
+SELECT * FROM dba_mon.report_interval(100,110);
+SELECT * FROM dba_mon.report_quality(100,110)
+ORDER BY severity,check_name;
+```
+
+Generate the report on the client running `psql`:
+
+```bash
+psql -X -v ON_ERROR_STOP=1 \
+  -d postgres_monitoring \
+  -v begin_snap=100 \
+  -v end_snap=110 \
+  -v output_file=postgres_awr_100_110.html \
+  -f report.sql
+```
+
+`output_file` is written by `psql`, not by the PostgreSQL server. Use a trusted
+local filename and run the command from the release directory. The report has
+embedded CSS, no JavaScript, and no external network dependencies.
+
+Run the SQL/API validation separately:
+
+```bash
+psql -X -v ON_ERROR_STOP=1 \
+  -d postgres_monitoring \
+  -v begin_snap=100 \
+  -v end_snap=110 \
+  -f validate_report.sql
+```
+
+Available report APIs:
+
+- `report_interval(begin_id,end_id)`
+- `report_quality(begin_id,end_id)`
+- `report_pgss_delta(begin_id,end_id)`
+- `report_database_delta(begin_id,end_id)`
+- `report_wal_delta(begin_id,end_id)`
+- `report_checkpointer_delta(begin_id,end_id)`
+- `report_bgwriter_delta(begin_id,end_id)`
+- `report_archiver_delta(begin_id,end_id)`
+- `report_io_delta(begin_id,end_id)`
+- `report_table_delta(begin_id,end_id)`
+- `report_vacuum_delta(begin_id,end_id)`
+- `report_index_delta(begin_id,end_id)`
+- `report_wait_summary(begin_id,end_id)`
+- `report_wait_chart(begin_id,end_id)`
+- `generate_html_report(begin_id,end_id)`
+
+Grant report execution to the read-only role after installation or upgrade:
+
+```sql
+GRANT EXECUTE ON FUNCTION dba_mon.report_interval(bigint,bigint) TO dba_mon_reader;
+GRANT EXECUTE ON FUNCTION dba_mon.report_quality(bigint,bigint) TO dba_mon_reader;
+GRANT EXECUTE ON FUNCTION dba_mon.report_pgss_delta(bigint,bigint) TO dba_mon_reader;
+GRANT EXECUTE ON FUNCTION dba_mon.report_database_delta(bigint,bigint) TO dba_mon_reader;
+GRANT EXECUTE ON FUNCTION dba_mon.report_wal_delta(bigint,bigint) TO dba_mon_reader;
+GRANT EXECUTE ON FUNCTION dba_mon.report_checkpointer_delta(bigint,bigint) TO dba_mon_reader;
+GRANT EXECUTE ON FUNCTION dba_mon.report_bgwriter_delta(bigint,bigint) TO dba_mon_reader;
+GRANT EXECUTE ON FUNCTION dba_mon.report_archiver_delta(bigint,bigint) TO dba_mon_reader;
+GRANT EXECUTE ON FUNCTION dba_mon.report_io_delta(bigint,bigint) TO dba_mon_reader;
+GRANT EXECUTE ON FUNCTION dba_mon.report_table_delta(bigint,bigint) TO dba_mon_reader;
+GRANT EXECUTE ON FUNCTION dba_mon.report_vacuum_delta(bigint,bigint) TO dba_mon_reader;
+GRANT EXECUTE ON FUNCTION dba_mon.report_index_delta(bigint,bigint) TO dba_mon_reader;
+GRANT EXECUTE ON FUNCTION dba_mon.report_wait_summary(bigint,bigint) TO dba_mon_reader;
+GRANT EXECUTE ON FUNCTION dba_mon.report_wait_chart(bigint,bigint) TO dba_mon_reader;
+GRANT EXECUTE ON FUNCTION dba_mon.generate_html_report(bigint,bigint) TO dba_mon_reader;
 ```
 
 ## End-to-end validation
@@ -421,7 +533,7 @@ Expected results:
 
 - server version is 17.x or 18.x;
 - both extensions are returned;
-- schema version `1.0.6` is returned;
+- schema version `1.1.0` is returned;
 - `pgss_info_source` returns exactly one row;
 - `pg_stat_statements` appears in `shared_preload_libraries`.
 
@@ -554,8 +666,8 @@ ORDER BY snapshot_id DESC
 LIMIT 10;
 ```
 
-Version 1.0.6 records these markers but `v_pgss_delta` does not yet enforce all
-of them. Consumers must exclude reset/restart-crossing intervals.
+The legacy consecutive `v_pgss_delta` view does not enforce every marker, but
+the v1.1 interval report functions reject cross-reset and cross-restart deltas.
 
 ### 7. Test retention (non-production)
 
@@ -591,9 +703,8 @@ The installation is ready for scheduling only when:
   available.
 - SQL delta rows exist only when both endpoints contain the statement and its
   counters did not decrease.
-- A PostgreSQL restart or statistics reset must split report intervals. Version
-  1.0.6 records these markers, but consumers must compare them before using
-  cumulative deltas.
+- A PostgreSQL restart or statistics reset splits report intervals. Version
+  1.1 report functions enforce these markers before returning cumulative deltas.
 - The repository captures all `pg_stat_statements` rows. Top-N belongs in the
   report layer, eliminating endpoint-selection bias.
 
@@ -603,5 +714,5 @@ The installation is ready for scheduling only when:
 - Remote cluster-wide capture is not implemented.
 - Cross-database collection is sequential and bounded by connection timeout.
 - Function, subscription, SLRU and configuration-history snapshots are planned
-  for v1.1.
-- ASH-style sampling and HTML reporting are planned for v1.1.
+  for a later release.
+- ASH-style sampling is planned for a later release.
