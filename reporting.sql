@@ -501,11 +501,17 @@ BEGIN
     SELECT original_label,row_number() OVER (ORDER BY sum(session_count) DESC,original_label) rn
     FROM raw GROUP BY original_label
   ), mapped AS (
-    SELECT r.bucket,CASE WHEN k.rn<=7 THEN r.original_label ELSE 'Other' END label,
-           CASE WHEN k.rn<=7 THEN k.rn ELSE 8 END rank,sum(r.session_count)::integer sessions
+    SELECT r.bucket,CASE WHEN r.original_label='Idle in transaction / Idle in transaction'
+                           THEN r.original_label
+                         WHEN k.rn<=6 THEN r.original_label ELSE 'Other' END label,
+           CASE WHEN r.original_label='Idle in transaction / Idle in transaction' THEN 8
+                WHEN k.rn<=6 THEN k.rn ELSE 7 END rank,sum(r.session_count)::integer sessions
     FROM raw r JOIN ranked k USING (original_label)
-    GROUP BY r.bucket,CASE WHEN k.rn<=7 THEN r.original_label ELSE 'Other' END,
-             CASE WHEN k.rn<=7 THEN k.rn ELSE 8 END
+    GROUP BY r.bucket,CASE WHEN r.original_label='Idle in transaction / Idle in transaction'
+                            THEN r.original_label
+                          WHEN k.rn<=6 THEN r.original_label ELSE 'Other' END,
+             CASE WHEN r.original_label='Idle in transaction / Idle in transaction' THEN 8
+                  WHEN k.rn<=6 THEN k.rn ELSE 7 END
   ), categories AS (
     SELECT label,min(rank)::integer rank FROM mapped GROUP BY label
   ), buckets AS (
@@ -532,9 +538,9 @@ BEGIN
     FROM coords GROUP BY label,rank
   )
   SELECT string_agg(format('<polygon points="%s" fill="%s" fill-opacity="0.82"><title>%s</title></polygon>',
-    points,CASE rank WHEN 1 THEN '#2563eb' WHEN 2 THEN '#16a34a' WHEN 3 THEN '#f59e0b'
+    points,CASE WHEN label='Idle in transaction / Idle in transaction' THEN '#cbd5e1' ELSE CASE rank WHEN 1 THEN '#2563eb' WHEN 2 THEN '#16a34a' WHEN 3 THEN '#f59e0b'
     WHEN 4 THEN '#dc2626' WHEN 5 THEN '#7c3aed' WHEN 6 THEN '#0891b2'
-    WHEN 7 THEN '#db2777' ELSE '#94a3b8' END,dba_mon._html_escape(label)),' ' ORDER BY rank)
+    WHEN 7 THEN '#64748b' ELSE '#94a3b8' END END,dba_mon._html_escape(label)),' ' ORDER BY rank)
   INTO v_areas FROM polygons;
 
   WITH labels AS (
@@ -543,25 +549,36 @@ BEGIN
     FROM dba_mon.report_wait_summary(p_begin_snapshot_id,p_end_snapshot_id)
     GROUP BY wait_event_type,wait_event
   ), shown AS (
-    SELECT CASE WHEN rn<=7 THEN label ELSE 'Other' END label,
-           CASE WHEN rn<=7 THEN rn ELSE 8 END rank,sum(total) total
-    FROM labels GROUP BY CASE WHEN rn<=7 THEN label ELSE 'Other' END,
-      CASE WHEN rn<=7 THEN rn ELSE 8 END
+    SELECT CASE WHEN label='Idle in transaction / Idle in transaction' THEN label
+                WHEN rn<=6 THEN label ELSE 'Other' END label,
+           CASE WHEN label='Idle in transaction / Idle in transaction' THEN 8
+                WHEN rn<=6 THEN rn ELSE 7 END rank,sum(total) total
+    FROM labels GROUP BY CASE WHEN label='Idle in transaction / Idle in transaction' THEN label
+                              WHEN rn<=6 THEN label ELSE 'Other' END,
+      CASE WHEN label='Idle in transaction / Idle in transaction' THEN 8
+           WHEN rn<=6 THEN rn ELSE 7 END
   )
   SELECT string_agg(format('<rect x="870" y="%s" width="12" height="12" fill="%s"/>'
     ||'<text x="888" y="%s" font-size="11">%s</text>',
-    28+(rank-1)*24,CASE rank WHEN 1 THEN '#2563eb' WHEN 2 THEN '#16a34a' WHEN 3 THEN '#f59e0b'
+    28+(rank-1)*24,CASE WHEN label='Idle in transaction / Idle in transaction' THEN '#cbd5e1' ELSE CASE rank WHEN 1 THEN '#2563eb' WHEN 2 THEN '#16a34a' WHEN 3 THEN '#f59e0b'
     WHEN 4 THEN '#dc2626' WHEN 5 THEN '#7c3aed' WHEN 6 THEN '#0891b2'
-    WHEN 7 THEN '#db2777' ELSE '#94a3b8' END,39+(rank-1)*24,dba_mon._html_escape(label)),' ' ORDER BY rank)
+    WHEN 7 THEN '#64748b' ELSE '#94a3b8' END END,39+(rank-1)*24,dba_mon._html_escape(label)),' ' ORDER BY rank)
   INTO v_legend FROM shown;
 
   RETURN format('<svg class="wait-chart" viewBox="0 0 1100 275" role="img" aria-label="Average active sessions by wait event">'
     ||'<line x1="55" y1="35" x2="55" y2="245" stroke="#64748b"/>'
     ||'<line x1="55" y1="245" x2="850" y2="245" stroke="#64748b"/>'
+    ||'<line x1="320" y1="35" x2="320" y2="245" stroke="#dce3ec"/>'
+    ||'<line x1="585" y1="35" x2="585" y2="245" stroke="#dce3ec"/>'
     ||'<text x="8" y="40" font-size="11">%s</text><text x="35" y="249" font-size="11">0</text>'
-    ||'<text x="55" y="265" font-size="11">%s</text><text x="730" y="265" font-size="11">%s</text>'
-    ||'%s%s</svg>',v_max,dba_mon._html_escape(i.begin_time::text),
-    dba_mon._html_escape(i.end_time::text),v_areas,v_legend);
+    ||'<text x="55" y="265" font-size="11">%s</text>'
+    ||'<text x="320" y="265" font-size="11" text-anchor="middle">%s</text>'
+    ||'<text x="585" y="265" font-size="11" text-anchor="middle">%s</text>'
+    ||'<text x="850" y="265" font-size="11" text-anchor="end">%s</text>'
+    ||'%s%s</svg>',v_max,to_char(i.begin_time,'HH24:MI:SS'),
+    to_char(i.begin_time+(i.end_time-i.begin_time)/3,'HH24:MI:SS'),
+    to_char(i.begin_time+((i.end_time-i.begin_time)*2)/3,'HH24:MI:SS'),
+    to_char(i.end_time,'HH24:MI:SS'),v_areas,v_legend);
 END;
 $$;
 
@@ -679,7 +696,7 @@ BEGIN
   END IF;
 
   v_html := v_html || '<section><h2>Average Active Sessions by Wait Event</h2>'
-    || '<p class="sub">Ten-second samples. CPU represents active sessions without a PostgreSQL wait event.</p>'
+    || '<p class="sub">Ten-second samples. CPU represents active sessions without a PostgreSQL wait event; idle-in-transaction sessions are shown separately in grey.</p>'
     || '<div class="chart-wrap">'
     || dba_mon.report_wait_chart(p_begin_snapshot_id,p_end_snapshot_id)
     || '</div></section>';

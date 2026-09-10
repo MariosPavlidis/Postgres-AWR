@@ -24,14 +24,20 @@ BEGIN
   )
   SELECT
     v_cluster_id,v_sampled_at,
-    coalesce(a.wait_event_type,'CPU'),coalesce(a.wait_event,'CPU'),
+    CASE WHEN a.state='idle in transaction' THEN 'Idle in transaction'
+         ELSE coalesce(a.wait_event_type,'CPU') END,
+    CASE WHEN a.state='idle in transaction' THEN 'Idle in transaction'
+         ELSE coalesce(a.wait_event,'CPU') END,
     count(*)::integer,
     count(*) FILTER (WHERE cardinality(pg_blocking_pids(a.pid)) > 0)::integer
   FROM pg_stat_activity AS a
   WHERE a.pid <> pg_backend_pid()
     AND a.backend_type = 'client backend'
-    AND a.state = 'active'
-  GROUP BY coalesce(a.wait_event_type,'CPU'),coalesce(a.wait_event,'CPU');
+    AND a.state IN ('active','idle in transaction')
+  GROUP BY CASE WHEN a.state='idle in transaction' THEN 'Idle in transaction'
+                ELSE coalesce(a.wait_event_type,'CPU') END,
+           CASE WHEN a.state='idle in transaction' THEN 'Idle in transaction'
+                ELSE coalesce(a.wait_event,'CPU') END;
 
   GET DIAGNOSTICS v_rows = ROW_COUNT;
   IF v_rows=0 THEN
