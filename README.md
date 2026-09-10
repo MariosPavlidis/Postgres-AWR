@@ -1,4 +1,4 @@
-# postgres-awr 1.1.1
+# postgres-awr 1.1.2
 
 SQL-only, centralized PostgreSQL monitoring repository for PostgreSQL 17 and 18.
 It is AWR-inspired; it is not an Oracle AWR clone and does not use undocumented
@@ -363,8 +363,8 @@ account. Replace `/opt/Postgres-AWR` and `/usr/bin/psql` with the actual paths:
 ```
 
 Linux cron does not schedule below one minute. `wait_sampler.sql` therefore
-calls `capture_wait_samples(6,10::numeric)`, which captures internally at 0, 10, 20, 30,
-40 and 50 seconds. An advisory lock prevents overlapping minute runners. Each
+calls `capture_wait_samples(30,2::numeric)`, which captures internally every two
+seconds for 30 samples per minute. An advisory lock prevents overlapping minute runners. Each
 sample groups active backends only by `wait_event_type` and `wait_event`;
 active backends without a wait event are recorded as `CPU / CPU`. Detailed
 samples use `detail_retention` and are purged by `purge_snapshots()`.
@@ -540,7 +540,7 @@ Expected results:
 
 - server version is 17.x or 18.x;
 - both extensions are returned;
-- schema version `1.1.1` is returned;
+- schema version `1.1.2` is returned;
 - `pgss_info_source` returns exactly one row;
 - `pg_stat_statements` appears in `shared_preload_libraries`.
 
