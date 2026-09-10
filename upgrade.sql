@@ -1,5 +1,5 @@
 \set ON_ERROR_STOP on
-\echo 'Upgrading postgres-awr to 1.1.2'
+\echo 'Upgrading postgres-awr to 1.1.3'
 
 BEGIN;
 
@@ -45,7 +45,7 @@ ALTER TABLE dba_mon.checkpointer_snap
   ALTER COLUMN num_done DROP NOT NULL;
 
 ALTER TABLE dba_mon.snapshot
-  ALTER COLUMN collector_version SET DEFAULT '1.1.2';
+  ALTER COLUMN collector_version SET DEFAULT '1.1.3';
 
 ALTER TABLE dba_mon.pgss_snap
   ADD COLUMN IF NOT EXISTS min_exec_time double precision NOT NULL DEFAULT 0,
@@ -73,7 +73,7 @@ CREATE INDEX IF NOT EXISTS ix_wait_sample_time
 \ir reporting.sql
 
 INSERT INTO dba_mon.schema_version(version, description)
-VALUES ('1.1.2', 'Two-second wait sampling')
+VALUES ('1.1.3', 'Two-second wait-report coverage')
 ON CONFLICT (version) DO NOTHING;
 
 COMMIT;
