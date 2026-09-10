@@ -1,5 +1,5 @@
 \set ON_ERROR_STOP on
-\echo 'Installing postgres-awr 1.1.1'
+\echo 'Installing postgres-awr 1.1.2'
 
 BEGIN;
 
@@ -87,7 +87,7 @@ CREATE TABLE IF NOT EXISTS dba_mon.snapshot (
   completed_at timestamptz,
   status text NOT NULL DEFAULT 'RUNNING'
     CHECK (status IN ('RUNNING','SUCCESS','PARTIAL','FAILED')),
-  collector_version text NOT NULL DEFAULT '1.1.1',
+  collector_version text NOT NULL DEFAULT '1.1.2',
   server_version_num integer NOT NULL,
   server_version text NOT NULL,
   system_identifier numeric(20,0),
@@ -364,7 +364,7 @@ CREATE INDEX IF NOT EXISTS ix_wait_sample_time
 \ir reporting.sql
 
 INSERT INTO dba_mon.schema_version(version, description)
-VALUES ('1.1.1', 'Complete Top SQL rows, WAL, and execution-time metrics')
+VALUES ('1.1.2', 'Two-second wait sampling')
 ON CONFLICT (version) DO NOTHING;
 
 COMMIT;
