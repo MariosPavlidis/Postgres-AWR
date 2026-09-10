@@ -105,9 +105,9 @@ AS $$
              THEN 'pg_stat_statements reset marker changed between endpoints'
              ELSE 'pg_stat_statements reset marker is stable' END FROM i
     UNION ALL
-    SELECT CASE WHEN actual_samples>=greatest(1,floor(interval_seconds/10)*0.8) THEN 'OK' ELSE 'WARNING' END,
-           'wait_sampling_coverage',format('%s of approximately %s expected ten-second samples captured',
-             actual_samples,greatest(1,floor(interval_seconds/10)))
+    SELECT CASE WHEN actual_samples>=greatest(1,floor(interval_seconds/2)*0.8) THEN 'OK' ELSE 'WARNING' END,
+           'wait_sampling_coverage',format('%s of approximately %s expected two-second samples captured',
+             actual_samples,greatest(1,floor(interval_seconds/2)))
     FROM i CROSS JOIN LATERAL (
       SELECT count(DISTINCT sampled_at) actual_samples
       FROM dba_mon.wait_sample w
@@ -724,7 +724,7 @@ BEGIN
   END IF;
 
   v_html := v_html || '<section><h2>Average Active Sessions by Wait Event</h2>'
-    || '<p class="sub">Ten-second samples. CPU represents active sessions without a PostgreSQL wait event; idle-in-transaction sessions are shown separately in grey.</p>'
+    || '<p class="sub">Two-second samples. CPU represents active sessions without a PostgreSQL wait event; idle-in-transaction sessions are shown separately in grey.</p>'
     || '<div class="chart-wrap">'
     || dba_mon.report_wait_chart(p_begin_snapshot_id,p_end_snapshot_id)
     || '</div></section>';
