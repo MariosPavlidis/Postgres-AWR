@@ -1,4 +1,4 @@
-# postgres-awr 1.1.0
+# postgres-awr 1.1.1
 
 SQL-only, centralized PostgreSQL monitoring repository for PostgreSQL 17 and 18.
 It is AWR-inspired; it is not an Oracle AWR clone and does not use undocumented
@@ -453,6 +453,11 @@ psql -X -v ON_ERROR_STOP=1 \
 local filename and run the command from the release directory. The report has
 embedded CSS, no JavaScript, and no external network dependencies.
 
+Top SQL tables include interval rows, average rows per call, and WAL generated.
+Minimum and maximum execution time are PostgreSQL endpoint values accumulated
+since the last `pg_stat_statements` reset; they are not subtractable interval
+counters. Use snapshots captured after upgrading to 1.1.1 for these fields.
+
 Run the SQL/API validation separately:
 
 ```bash
@@ -468,6 +473,7 @@ Available report APIs:
 - `report_interval(begin_id,end_id)`
 - `report_quality(begin_id,end_id)`
 - `report_pgss_delta(begin_id,end_id)`
+- `report_pgss_metrics(begin_id,end_id)`
 - `report_database_delta(begin_id,end_id)`
 - `report_wal_delta(begin_id,end_id)`
 - `report_checkpointer_delta(begin_id,end_id)`
@@ -487,6 +493,7 @@ Grant report execution to the read-only role after installation or upgrade:
 GRANT EXECUTE ON FUNCTION dba_mon.report_interval(bigint,bigint) TO dba_mon_reader;
 GRANT EXECUTE ON FUNCTION dba_mon.report_quality(bigint,bigint) TO dba_mon_reader;
 GRANT EXECUTE ON FUNCTION dba_mon.report_pgss_delta(bigint,bigint) TO dba_mon_reader;
+GRANT EXECUTE ON FUNCTION dba_mon.report_pgss_metrics(bigint,bigint) TO dba_mon_reader;
 GRANT EXECUTE ON FUNCTION dba_mon.report_database_delta(bigint,bigint) TO dba_mon_reader;
 GRANT EXECUTE ON FUNCTION dba_mon.report_wal_delta(bigint,bigint) TO dba_mon_reader;
 GRANT EXECUTE ON FUNCTION dba_mon.report_checkpointer_delta(bigint,bigint) TO dba_mon_reader;
@@ -533,7 +540,7 @@ Expected results:
 
 - server version is 17.x or 18.x;
 - both extensions are returned;
-- schema version `1.1.0` is returned;
+- schema version `1.1.1` is returned;
 - `pgss_info_source` returns exactly one row;
 - `pg_stat_statements` appears in `shared_preload_libraries`.
 
