@@ -1,4 +1,4 @@
-# postgres-awr 1.1.2
+# postgres-awr 1.1.3
 
 SQL-only, centralized PostgreSQL monitoring repository for PostgreSQL 17 and 18.
 It is AWR-inspired; it is not an Oracle AWR clone and does not use undocumented
@@ -540,7 +540,7 @@ Expected results:
 
 - server version is 17.x or 18.x;
 - both extensions are returned;
-- schema version `1.1.2` is returned;
+- schema version `1.1.3` is returned;
 - `pgss_info_source` returns exactly one row;
 - `pg_stat_statements` appears in `shared_preload_libraries`.
 
