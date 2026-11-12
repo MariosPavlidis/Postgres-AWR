@@ -82,6 +82,40 @@ createdb postgres_monitoring
 psql -X -v ON_ERROR_STOP=1 -d postgres_monitoring -f install.sql
 ```
 
+## Upgrade
+
+### Full version upgrade (schema changes)
+
+Run `upgrade.sql` against the repository database. The script is transactional:
+it applies any schema changes, reloads all executable objects, and records the
+new version. It is safe to re-run; `IF NOT EXISTS` and `ON CONFLICT DO NOTHING`
+guards make it idempotent.
+
+```bash
+psql -X -v ON_ERROR_STOP=1 -d postgres_monitoring -f upgrade.sql
+```
+
+Confirm the new version after the upgrade:
+
+```sql
+SELECT version, installed_at, installed_by
+FROM dba_mon.schema_version
+ORDER BY installed_at DESC
+LIMIT 1;
+```
+
+### Reporting-only update (no schema changes)
+
+When only `reporting.sql` changes (function bodies, HTML output, new report
+columns), no schema migration is required. Reload the reporting layer directly:
+
+```bash
+psql -X -v ON_ERROR_STOP=1 -d postgres_monitoring -f reporting.sql
+```
+
+`CREATE OR REPLACE FUNCTION` replaces each function in place. No restart, no
+capture interruption, and no data loss.
+
 ## Mandatory target configuration
 
 Installation creates repository objects but does not automatically select
