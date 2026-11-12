@@ -206,20 +206,30 @@ CREATE OR REPLACE FUNCTION dba_mon.report_pgss_metrics(
 LANGUAGE sql STABLE SECURITY DEFINER
 SET search_path = pg_catalog, dba_mon
 AS $$
- WITH watermarks AS (
+ WITH windowed AS (
    SELECT p.database_target_id, p.userid, p.dbid, p.toplevel, p.queryid,
-          MIN(CASE WHEN p.min_exec_time <
-                        LAG(p.min_exec_time) OVER w
-                   THEN p.min_exec_time END) AS interval_min,
-          MAX(CASE WHEN p.max_exec_time >
-                        LAG(p.max_exec_time) OVER w
-                   THEN p.max_exec_time END) AS interval_max
+          p.snapshot_id,
+          p.min_exec_time, p.max_exec_time,
+          LAG(p.min_exec_time) OVER (
+            PARTITION BY p.database_target_id, p.userid, p.dbid,
+                         p.toplevel, p.queryid
+            ORDER BY p.snapshot_id
+          ) AS prev_min,
+          LAG(p.max_exec_time) OVER (
+            PARTITION BY p.database_target_id, p.userid, p.dbid,
+                         p.toplevel, p.queryid
+            ORDER BY p.snapshot_id
+          ) AS prev_max
    FROM dba_mon.pgss_snap p
    WHERE p.snapshot_id >= $1 AND p.snapshot_id <= $2
-   WINDOW w AS (PARTITION BY p.database_target_id, p.userid, p.dbid,
-                              p.toplevel, p.queryid
-                ORDER BY p.snapshot_id)
-   GROUP BY p.database_target_id, p.userid, p.dbid, p.toplevel, p.queryid
+ ),
+ watermarks AS (
+   SELECT database_target_id, userid, dbid, toplevel, queryid,
+          MIN(CASE WHEN min_exec_time < prev_min THEN min_exec_time END) AS interval_min,
+          MAX(CASE WHEN max_exec_time > prev_max THEN max_exec_time END) AS interval_max
+   FROM windowed
+   WHERE snapshot_id > $1
+   GROUP BY database_target_id, userid, dbid, toplevel, queryid
  )
  SELECT d.database_target_id,d.database_name,d.userid,d.dbid,d.toplevel,
         d.queryid,d.query,d.calls,d.total_exec_time_ms,d.mean_exec_time_ms,
