@@ -855,15 +855,57 @@ BEGIN
   END IF;
 
   SELECT coalesce(string_agg(format('<tr><td>%s</td><td>%s.%s</td><td>%s</td><td>%s</td>'
+      || '<td>%s</td><td>%s</td></tr>',dba_mon._html_escape(database_name::text),
+      dba_mon._html_escape(schemaname::text),dba_mon._html_escape(relname::text),
+      seq_scan,seq_tup_read,idx_scan,pg_size_pretty(total_relation_size)),''),
+      '<tr><td colspan="6" class="empty">No valid table deltas</td></tr>') INTO v_rows
+  FROM (SELECT * FROM dba_mon.report_table_delta(p_begin_snapshot_id,p_end_snapshot_id)
+        WHERE seq_scan>0 ORDER BY seq_scan DESC LIMIT 10) q;
+  v_html := v_html || '<section><h2>Top Tables by Sequential Scans</h2><div class="table-wrap"><table><thead><tr>'
+    || '<th>Database</th><th>Table</th><th>Seq scans</th><th>Seq rows read</th>'
+    || '<th>Index scans</th><th>Size</th></tr></thead><tbody>'
+    || v_rows || '</tbody></table></div><a class="back-to-top" href="#top">Back to top</a></section>';
+
+  SELECT coalesce(string_agg(format('<tr><td>%s</td><td>%s.%s</td><td>%s</td><td>%s</td>'
       || '<td>%s</td><td>%s</td><td>%s</td></tr>',dba_mon._html_escape(database_name::text),
-      dba_mon._html_escape(schemaname::text),dba_mon._html_escape(relname::text),seq_tup_read,
-      inserts,updates,deletes,dead_tuples),''),
+      dba_mon._html_escape(schemaname::text),dba_mon._html_escape(relname::text),
+      inserts,updates,deletes,hot_updates,pg_size_pretty(total_relation_size)),''),
       '<tr><td colspan="7" class="empty">No valid table deltas</td></tr>') INTO v_rows
   FROM (SELECT * FROM dba_mon.report_table_delta(p_begin_snapshot_id,p_end_snapshot_id)
-        ORDER BY seq_tup_read+inserts+updates+deletes DESC LIMIT 20) q;
-  v_html := v_html || '<section><h2>Top Table Activity</h2><div class="table-wrap"><table><thead><tr>'
-    || '<th>Database</th><th>Table</th><th>Sequential rows</th><th>Inserts</th><th>Updates</th>'
-    || '<th>Deletes</th><th>Dead tuples</th></tr></thead><tbody>' || v_rows || '</tbody></table></div><a class="back-to-top" href="#top">Back to top</a></section>';
+        WHERE inserts+updates+deletes>0 ORDER BY inserts+updates+deletes DESC LIMIT 10) q;
+  v_html := v_html || '<section><h2>Top Tables by Writes</h2><div class="table-wrap"><table><thead><tr>'
+    || '<th>Database</th><th>Table</th><th>Inserts</th><th>Updates</th>'
+    || '<th>Deletes</th><th>HOT updates</th><th>Size</th></tr></thead><tbody>'
+    || v_rows || '</tbody></table></div><a class="back-to-top" href="#top">Back to top</a></section>';
+
+  SELECT coalesce(string_agg(format('<tr><td>%s</td><td>%s.%s</td><td>%s</td><td>%s</td>'
+      || '<td>%s</td><td>%s</td><td>%s</td></tr>',dba_mon._html_escape(database_name::text),
+      dba_mon._html_escape(schemaname::text),dba_mon._html_escape(relname::text),
+      dead_tuples,live_tuples,
+      coalesce(round(100.0*dead_tuples/nullif(live_tuples+dead_tuples,0),1)::text,'n/a'),
+      dba_mon._html_escape(coalesce(last_autovacuum::text,'never')),
+      dba_mon._html_escape(coalesce(last_vacuum::text,'never'))),''),
+      '<tr><td colspan="7" class="empty">No valid table deltas</td></tr>') INTO v_rows
+  FROM (SELECT * FROM dba_mon.report_table_delta(p_begin_snapshot_id,p_end_snapshot_id)
+        WHERE dead_tuples>0 ORDER BY dead_tuples DESC LIMIT 10) q;
+  v_html := v_html || '<section><h2>Top Tables by Dead Tuples</h2><div class="table-wrap"><table><thead><tr>'
+    || '<th>Database</th><th>Table</th><th>Dead tuples</th><th>Live tuples</th>'
+    || '<th>Dead %</th><th>Last autovacuum</th><th>Last vacuum</th></tr></thead><tbody>'
+    || v_rows || '</tbody></table></div><a class="back-to-top" href="#top">Back to top</a></section>';
+
+  SELECT coalesce(string_agg(format('<tr><td>%s</td><td>%s.%s</td><td>%s</td><td>%s</td>'
+      || '<td>%s</td><td>%s</td></tr>',dba_mon._html_escape(database_name::text),
+      dba_mon._html_escape(schemaname::text),dba_mon._html_escape(relname::text),
+      modifications_since_analyze,live_tuples,
+      dba_mon._html_escape(coalesce(last_autoanalyze::text,'never')),
+      dba_mon._html_escape(coalesce(last_analyze::text,'never'))),''),
+      '<tr><td colspan="6" class="empty">No valid table deltas</td></tr>') INTO v_rows
+  FROM (SELECT * FROM dba_mon.report_table_delta(p_begin_snapshot_id,p_end_snapshot_id)
+        WHERE modifications_since_analyze>0 ORDER BY modifications_since_analyze DESC LIMIT 10) q;
+  v_html := v_html || '<section><h2>Top Tables by Modifications Since Analyze</h2><div class="table-wrap"><table><thead><tr>'
+    || '<th>Database</th><th>Table</th><th>Mods since analyze</th><th>Live tuples</th>'
+    || '<th>Last autoanalyze</th><th>Last analyze</th></tr></thead><tbody>'
+    || v_rows || '</tbody></table></div><a class="back-to-top" href="#top">Back to top</a></section>';
 
   SELECT coalesce(string_agg(format('<tr><td>%s</td><td>%s.%s</td><td>%s</td><td>%s</td>'
       || '<td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>',
@@ -880,10 +922,11 @@ BEGIN
     || '<th>Last vacuum</th></tr></thead><tbody>' || v_rows || '</tbody></table></div>'
     || '<a class="back-to-top" href="#top">Back to top</a></section>';
 
-  SELECT coalesce(string_agg(format('<tr><td>%s</td><td>%s.%s</td><td>%s</td><td>%s</td>'
+  SELECT coalesce(string_agg(format('<tr><td>%s</td><td>%s.%s</td><td>%s.%s</td><td>%s</td>'
       || '<td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>',dba_mon._html_escape(database_name::text),
       dba_mon._html_escape(schemaname::text),dba_mon._html_escape(indexrelname::text),
-      dba_mon._html_escape(relname::text),idx_scan,idx_tup_read,idx_tup_fetch,
+      dba_mon._html_escape(schemaname::text),dba_mon._html_escape(relname::text),
+      idx_scan,idx_tup_read,idx_tup_fetch,
       pg_size_pretty(index_size),dba_mon._html_escape(coalesce(last_idx_scan::text,'never'))),''),
       '<tr><td colspan="8" class="empty">No valid index deltas</td></tr>') INTO v_rows
   FROM (SELECT * FROM dba_mon.report_index_delta(p_begin_snapshot_id,p_end_snapshot_id)
