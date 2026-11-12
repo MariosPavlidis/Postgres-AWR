@@ -188,6 +188,7 @@ AS $$
     AND e.wal_bytes >= b.wal_bytes;
 $$;
 
+DROP FUNCTION IF EXISTS dba_mon.report_pgss_metrics(bigint,bigint);
 CREATE OR REPLACE FUNCTION dba_mon.report_pgss_metrics(
   p_begin_snapshot_id bigint,
   p_end_snapshot_id bigint
