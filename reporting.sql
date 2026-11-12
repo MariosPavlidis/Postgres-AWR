@@ -197,23 +197,45 @@ CREATE OR REPLACE FUNCTION dba_mon.report_pgss_metrics(
   total_exec_time_ms double precision, mean_exec_time_ms double precision,
   min_exec_time_ms_since_reset double precision,
   max_exec_time_ms_since_reset double precision,
+  interval_min_exec_time_ms double precision,
+  interval_max_exec_time_ms double precision,
   rows bigint, average_rows_per_call numeric, shared_blks_read bigint,
   shared_blks_hit bigint, temp_blks_written bigint, wal_bytes numeric
 )
 LANGUAGE sql STABLE SECURITY DEFINER
 SET search_path = pg_catalog, dba_mon
 AS $$
+ WITH watermarks AS (
+   SELECT p.database_target_id, p.userid, p.dbid, p.toplevel, p.queryid,
+          MIN(CASE WHEN p.min_exec_time <
+                        LAG(p.min_exec_time) OVER w
+                   THEN p.min_exec_time END) AS interval_min,
+          MAX(CASE WHEN p.max_exec_time >
+                        LAG(p.max_exec_time) OVER w
+                   THEN p.max_exec_time END) AS interval_max
+   FROM dba_mon.pgss_snap p
+   WHERE p.snapshot_id >= $1 AND p.snapshot_id <= $2
+   WINDOW w AS (PARTITION BY p.database_target_id, p.userid, p.dbid,
+                              p.toplevel, p.queryid
+                ORDER BY p.snapshot_id)
+   GROUP BY p.database_target_id, p.userid, p.dbid, p.toplevel, p.queryid
+ )
  SELECT d.database_target_id,d.database_name,d.userid,d.dbid,d.toplevel,
         d.queryid,d.query,d.calls,d.total_exec_time_ms,d.mean_exec_time_ms,
-        e.min_exec_time,e.max_exec_time,d.rows,
-        round(d.rows::numeric/nullif(d.calls,0),3),d.shared_blks_read,
+        e.min_exec_time,e.max_exec_time,
+        wm.interval_min,wm.interval_max,
+        d.rows,round(d.rows::numeric/nullif(d.calls,0),3),d.shared_blks_read,
         d.shared_blks_hit,d.temp_blks_written,d.wal_bytes
  FROM dba_mon.report_pgss_delta($1,$2) d
  JOIN dba_mon.pgss_snap e
    ON e.snapshot_id=$2
   AND e.database_target_id=d.database_target_id
   AND e.userid=d.userid AND e.dbid=d.dbid
-  AND e.toplevel=d.toplevel AND e.queryid=d.queryid;
+  AND e.toplevel=d.toplevel AND e.queryid=d.queryid
+ LEFT JOIN watermarks wm
+   ON wm.database_target_id=d.database_target_id
+  AND wm.userid=d.userid AND wm.dbid=d.dbid
+  AND wm.toplevel=d.toplevel AND wm.queryid=d.queryid;
 $$;
 
 CREATE OR REPLACE FUNCTION dba_mon.report_database_delta(
@@ -752,26 +774,32 @@ BEGIN
   LOOP
     EXECUTE format($q$
       SELECT coalesce(string_agg(format('<tr><td>%%s</td><td>%%s</td><td>%%s</td>'
+        || '<td>%%s</td><td>%%s</td><td>%%s</td><td>%%s</td><td>%%s</td><td>%%s</td>'
         || '<td>%%s</td><td>%%s</td><td>%%s</td><td>%%s</td><td>%%s</td>'
-        || '<td>%%s</td><td>%%s</td><td>%%s</td><td>%%s</td><td class="query">%%s</td></tr>',
+        || '<td class="query">%%s</td></tr>',
         dba_mon._html_escape(database_name::text),queryid,calls,
         round(total_exec_time_ms::numeric,3),round(mean_exec_time_ms::numeric,3),
+        coalesce(round(interval_min_exec_time_ms::numeric,3)::text,'—'),
+        coalesce(round(interval_max_exec_time_ms::numeric,3)::text,'—'),
         round(min_exec_time_ms_since_reset::numeric,3),
-        round(max_exec_time_ms_since_reset::numeric,3),rows,average_rows_per_call,
+        round(max_exec_time_ms_since_reset::numeric,3),
+        rows,average_rows_per_call,
         shared_blks_read,temp_blks_written,pg_size_pretty(wal_bytes::bigint),
         dba_mon._html_escape(left(query,500))),''),
-        '<tr><td colspan="13" class="empty">No valid SQL deltas</td></tr>')
+        '<tr><td colspan="15" class="empty">No valid SQL deltas</td></tr>')
       FROM (SELECT * FROM dba_mon.report_pgss_metrics($1,$2)
             WHERE calls>0 ORDER BY %I DESC NULLS LAST LIMIT 10) q
     $q$,v_metric) INTO v_rows USING p_begin_snapshot_id,p_end_snapshot_id;
     v_html := v_html || format('<section><h2>%s</h2><div class="table-wrap"><table><thead><tr>',v_title)
       || '<th>Database</th><th>Query ID</th><th>Calls</th><th>Total ms</th><th>Mean ms</th>'
-      || '<th>Min ms*</th><th>Max ms*</th><th>Rows</th><th>Avg rows/call</th>'
+      || '<th>Min ms†</th><th>Max ms†</th><th>Min ms*</th><th>Max ms*</th>'
+      || '<th>Rows</th><th>Avg rows/call</th>'
       || '<th>Reads</th><th>Temp writes</th><th>WAL</th><th>SQL text</th></tr></thead><tbody>'
       || v_rows || '</tbody></table></div><a class="back-to-top" href="#top">Back to top</a></section>';
   END LOOP;
 
-  v_html := v_html || '<p class="sub">* Min/max execution time are endpoint values since the last pg_stat_statements reset; PostgreSQL cannot derive exact interval-only extrema from cumulative snapshots.</p>';
+  v_html := v_html || '<p class="sub">† Interval min/max: observed only when the pg_stat_statements watermark changed within the report period; — means no new extremum was recorded in this interval.'
+    || ' * Min/max since reset: cumulative endpoint values since the last pg_stat_statements reset.</p>';
 
   SELECT coalesce(string_agg(format('<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td>'
       || '<td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>',
