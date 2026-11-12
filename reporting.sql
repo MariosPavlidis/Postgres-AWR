@@ -806,11 +806,11 @@ BEGIN
       || '<th>Min ms†</th><th>Max ms†</th><th>Min ms*</th><th>Max ms*</th>'
       || '<th>Rows</th><th>Avg rows/call</th>'
       || '<th>Reads</th><th>Temp writes</th><th>WAL</th><th>SQL text</th></tr></thead><tbody>'
-      || v_rows || '</tbody></table></div><a class="back-to-top" href="#top">Back to top</a></section>';
+      || v_rows || '</tbody></table></div>'
+      || '<p class="sub">† Interval min/max: observed only when the pg_stat_statements watermark changed within the report period; — means no new extremum was recorded in this interval.'
+      || ' * Min/max since reset: cumulative endpoint values since the last pg_stat_statements reset.</p>'
+      || '<a class="back-to-top" href="#top">Back to top</a></section>';
   END LOOP;
-
-  v_html := v_html || '<p class="sub">† Interval min/max: observed only when the pg_stat_statements watermark changed within the report period; — means no new extremum was recorded in this interval.'
-    || ' * Min/max since reset: cumulative endpoint values since the last pg_stat_statements reset.</p>';
 
   SELECT coalesce(string_agg(format('<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td>'
       || '<td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>',
