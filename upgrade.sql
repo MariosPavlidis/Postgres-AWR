@@ -1,5 +1,5 @@
 \set ON_ERROR_STOP on
-\echo 'Upgrading postgres-awr to 1.3.5'
+\echo 'Upgrading postgres-awr to 1.3.6'
 
 BEGIN;
 
@@ -45,7 +45,7 @@ ALTER TABLE dba_mon.checkpointer_snap
   ALTER COLUMN num_done DROP NOT NULL;
 
 ALTER TABLE dba_mon.snapshot
-  ALTER COLUMN collector_version SET DEFAULT '1.3.5';
+  ALTER COLUMN collector_version SET DEFAULT '1.3.6';
 
 ALTER TABLE dba_mon.pgss_snap
   ADD COLUMN IF NOT EXISTS min_exec_time double precision NOT NULL DEFAULT 0,
@@ -73,7 +73,7 @@ CREATE INDEX IF NOT EXISTS ix_wait_sample_time
 \ir reporting.sql
 
 INSERT INTO dba_mon.schema_version(version, description)
-VALUES ('1.3.5', 'Add Unused Indexes report section')
+VALUES ('1.3.6', 'Add Top Tables by Size Growth report section')
 ON CONFLICT (version) DO NOTHING;
 
 COMMIT;
