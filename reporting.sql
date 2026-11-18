@@ -813,16 +813,18 @@ BEGIN
   END LOOP;
 
   SELECT coalesce(string_agg(format('<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td>'
-      || '<td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>',
+      || '<td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>',
       dba_mon._html_escape(backend_type),dba_mon._html_escape(object),dba_mon._html_escape(context),
       reads,pg_size_pretty(read_bytes::bigint),writes,pg_size_pretty(write_bytes::bigint),
-      round((read_time_ms+write_time_ms)::numeric,3)),''),
-      '<tr><td colspan="8" class="empty">No valid I/O deltas</td></tr>') INTO v_rows
+      round((read_time_ms+write_time_ms)::numeric,3),
+      extends,pg_size_pretty(extend_bytes::bigint),fsyncs,round(fsync_time_ms::numeric,3)),''),
+      '<tr><td colspan="12" class="empty">No valid I/O deltas</td></tr>') INTO v_rows
   FROM (SELECT * FROM dba_mon.report_io_delta(p_begin_snapshot_id,p_end_snapshot_id)
         ORDER BY read_bytes+write_bytes DESC LIMIT 30) q;
   v_html := v_html || '<section><h2>I/O Profile</h2><div class="table-wrap"><table><thead><tr>'
     || '<th>Backend</th><th>Object</th><th>Context</th><th>Reads</th><th>Read bytes</th>'
-    || '<th>Writes</th><th>Write bytes</th><th>I/O time ms</th></tr></thead><tbody>'
+    || '<th>Writes</th><th>Write bytes</th><th>I/O time ms</th>'
+    || '<th>Extends</th><th>Extend bytes</th><th>Fsyncs</th><th>Fsync time ms</th></tr></thead><tbody>'
     || v_rows || '</tbody></table></div><a class="back-to-top" href="#top">Back to top</a></section>';
 
   SELECT * INTO r FROM dba_mon.report_wal_delta(p_begin_snapshot_id,p_end_snapshot_id);
