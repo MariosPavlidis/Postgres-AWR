@@ -893,7 +893,8 @@ BEGIN
   SELECT * INTO r FROM dba_mon.report_bgwriter_delta(p_begin_snapshot_id,p_end_snapshot_id);
   IF FOUND THEN v_html := v_html
     || format('<div class="card"><div class="label">Buffers cleaned</div><div class="value">%s</div></div>',r.buffers_clean)
-    || format('<div class="card"><div class="label">Maxwritten stops</div><div class="value">%s</div></div>',r.maxwritten_clean); END IF;
+    || format('<div class="card"><div class="label">Maxwritten stops</div><div class="value">%s</div></div>',r.maxwritten_clean)
+    || format('<div class="card"><div class="label">Buffers allocated</div><div class="value">%s</div></div>',r.buffers_alloc); END IF;
   v_html := v_html || '</div></section>';
 
   SELECT * INTO r FROM dba_mon.report_archiver_delta(p_begin_snapshot_id,p_end_snapshot_id);
