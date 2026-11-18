@@ -418,6 +418,7 @@ CREATE OR REPLACE FUNCTION dba_mon.report_table_delta(
   idx_scan bigint, idx_tup_fetch bigint, inserts bigint, updates bigint,
   deletes bigint, hot_updates bigint, live_tuples bigint, dead_tuples bigint,
   modifications_since_analyze bigint, total_relation_size bigint,
+  size_growth bigint,
   last_vacuum timestamptz, last_autovacuum timestamptz,
   last_analyze timestamptz, last_autoanalyze timestamptz)
 LANGUAGE sql STABLE SECURITY DEFINER
@@ -429,6 +430,7 @@ AS $$
         e.n_tup_ins-b.n_tup_ins,e.n_tup_upd-b.n_tup_upd,
         e.n_tup_del-b.n_tup_del,e.n_tup_hot_upd-b.n_tup_hot_upd,
         e.n_live_tup,e.n_dead_tup,e.n_mod_since_analyze,e.total_relation_size,
+        e.total_relation_size-b.total_relation_size,
         e.last_vacuum,e.last_autovacuum,e.last_analyze,e.last_autoanalyze
  FROM dba_mon.table_snap b JOIN dba_mon.table_snap e
    ON e.database_target_id=b.database_target_id AND e.relid=b.relid
@@ -929,6 +931,18 @@ BEGIN
     || '<th>Database</th><th>Schema</th><th>Table</th><th>Mods since analyze</th><th>Live tuples</th>'
     || '<th>Last autoanalyze</th><th>Last analyze</th></tr></thead><tbody>'
     || v_rows || '</tbody></table></div><a class="back-to-top" href="#top">Back to top</a></section>';
+
+  SELECT coalesce(string_agg(format('<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>',
+      dba_mon._html_escape(database_name::text),
+      dba_mon._html_escape(schemaname::text),dba_mon._html_escape(relname::text),
+      pg_size_pretty(total_relation_size),pg_size_pretty(size_growth)),''),
+      '<tr><td colspan="5" class="empty">No table size growth in this interval</td></tr>') INTO v_rows
+  FROM (SELECT * FROM dba_mon.report_table_delta(p_begin_snapshot_id,p_end_snapshot_id)
+        WHERE size_growth>0 ORDER BY size_growth DESC LIMIT 10) q;
+  v_html := v_html || '<section><h2>Top Tables by Size Growth</h2><div class="table-wrap"><table><thead><tr>'
+    || '<th>Database</th><th>Schema</th><th>Table</th><th>End size</th><th>Growth</th>'
+    || '</tr></thead><tbody>' || v_rows || '</tbody></table></div>'
+    || '<a class="back-to-top" href="#top">Back to top</a></section>';
 
   SELECT coalesce(string_agg(format('<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td>'
       || '<td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>',
