@@ -1017,14 +1017,17 @@ BEGIN
     || ' Last scan: timestamp since stats reset; ''never'' means no scan since last stats reset.</p>'
     || '<a class="back-to-top" href="#top">Back to top</a></section>';
 
-  SELECT coalesce(string_agg(format('<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>',
+  SELECT coalesce(string_agg(format('<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>',
       dba_mon._html_escape(application_name),dba_mon._html_escape(coalesce(client_addr::text,'')),
       dba_mon._html_escape(state),dba_mon._html_escape(sync_state),
-      dba_mon._html_escape(coalesce(replay_lag::text,''))),''),
-      '<tr><td colspan="5" class="empty">No replication senders (normal for standalone servers)</td></tr>') INTO v_rows
+      dba_mon._html_escape(coalesce(write_lag::text,'—')),
+      dba_mon._html_escape(coalesce(flush_lag::text,'—')),
+      dba_mon._html_escape(coalesce(replay_lag::text,'—'))),''),
+      '<tr><td colspan="7" class="empty">No replication senders (normal for standalone servers)</td></tr>') INTO v_rows
   FROM dba_mon.replication_snap WHERE snapshot_id=p_end_snapshot_id;
   v_html := v_html || '<section><h2>Replication at End Snapshot</h2><div class="table-wrap"><table><thead><tr>'
-    || '<th>Application</th><th>Client</th><th>State</th><th>Sync state</th><th>Replay lag</th>'
+    || '<th>Application</th><th>Client</th><th>State</th><th>Sync state</th>'
+    || '<th>Write lag</th><th>Flush lag</th><th>Replay lag</th>'
     || '</tr></thead><tbody>' || v_rows || '</tbody></table></div><a class="back-to-top" href="#top">Back to top</a></section>';
 
   SELECT coalesce(string_agg(format('<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>',
