@@ -960,6 +960,22 @@ BEGIN
     || '<th>Size</th><th>Last scan</th></tr></thead><tbody>' || v_rows || '</tbody></table></div>'
     || '<a class="back-to-top" href="#top">Back to top</a></section>';
 
+  SELECT coalesce(string_agg(format('<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>',
+      dba_mon._html_escape(database_name::text),
+      dba_mon._html_escape(schemaname::text),dba_mon._html_escape(indexrelname::text),
+      dba_mon._html_escape(relname::text),
+      pg_size_pretty(index_size),dba_mon._html_escape(coalesce(last_idx_scan::text,'never'))),''),
+      '<tr><td colspan="6" class="empty">All indexes were used during this interval</td></tr>') INTO v_rows
+  FROM (SELECT * FROM dba_mon.report_index_delta(p_begin_snapshot_id,p_end_snapshot_id)
+        WHERE idx_scan=0
+        ORDER BY index_size DESC LIMIT 20) q;
+  v_html := v_html || '<section><h2>Unused Indexes</h2><div class="table-wrap"><table><thead><tr>'
+    || '<th>Database</th><th>Schema</th><th>Index</th><th>Table</th>'
+    || '<th>Size</th><th>Last scan</th></tr></thead><tbody>' || v_rows || '</tbody></table></div>'
+    || '<p class="sub">Indexes with zero scans during the report interval, largest first.'
+    || ' Last scan: timestamp since stats reset; ''never'' means no scan since last stats reset.</p>'
+    || '<a class="back-to-top" href="#top">Back to top</a></section>';
+
   SELECT coalesce(string_agg(format('<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>',
       dba_mon._html_escape(application_name),dba_mon._html_escape(coalesce(client_addr::text,'')),
       dba_mon._html_escape(state),dba_mon._html_escape(sync_state),
