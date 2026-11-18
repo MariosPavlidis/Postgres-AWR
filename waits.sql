@@ -29,7 +29,9 @@ BEGIN
     CASE WHEN a.state='idle in transaction' THEN 'Idle in transaction'
          ELSE coalesce(a.wait_event,'CPU') END,
     count(*)::integer,
-    count(*) FILTER (WHERE cardinality(pg_blocking_pids(a.pid)) > 0)::integer
+    count(*) FILTER (WHERE a.state <> 'idle in transaction'
+                        AND a.wait_event_type IN ('Lock','BufferPin')
+                        AND cardinality(pg_blocking_pids(a.pid)) > 0)::integer
   FROM pg_stat_activity AS a
   WHERE a.pid <> pg_backend_pid()
     AND a.backend_type = 'client backend'
