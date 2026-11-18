@@ -143,6 +143,9 @@ CREATE OR REPLACE FUNCTION dba_mon.report_pgss_delta(
   toplevel boolean,
   queryid bigint,
   query text,
+  plans bigint,
+  total_plan_time_ms double precision,
+  mean_plan_time_ms double precision,
   calls bigint,
   total_exec_time_ms double precision,
   mean_exec_time_ms double precision,
@@ -159,6 +162,9 @@ SET search_path = pg_catalog, dba_mon
 AS $$
   SELECT e.database_target_id, dt.database_name, e.userid, e.dbid,
          e.toplevel, e.queryid, e.query,
+         e.plans - b.plans,
+         e.total_plan_time - b.total_plan_time,
+         (e.total_plan_time - b.total_plan_time) / NULLIF(e.plans - b.plans, 0),
          e.calls - b.calls,
          e.total_exec_time - b.total_exec_time,
          (e.total_exec_time - b.total_exec_time) / NULLIF(e.calls - b.calls, 0),
@@ -179,6 +185,8 @@ AS $$
                 WHERE sb.snapshot_id=$1 AND se.snapshot_id=$2
                   AND sb.postmaster_start_time=se.postmaster_start_time
                   AND sb.pgss_stats_reset IS NOT DISTINCT FROM se.pgss_stats_reset)
+    AND e.plans >= b.plans
+    AND e.total_plan_time >= b.total_plan_time
     AND e.calls >= b.calls
     AND e.total_exec_time >= b.total_exec_time
     AND e.rows >= b.rows
@@ -194,7 +202,9 @@ CREATE OR REPLACE FUNCTION dba_mon.report_pgss_metrics(
   p_end_snapshot_id bigint
 ) RETURNS TABLE (
   database_target_id bigint, database_name name, userid oid, dbid oid,
-  toplevel boolean, queryid bigint, query text, calls bigint,
+  toplevel boolean, queryid bigint, query text,
+  plans bigint, total_plan_time_ms double precision, mean_plan_time_ms double precision,
+  calls bigint,
   total_exec_time_ms double precision, mean_exec_time_ms double precision,
   min_exec_time_ms_since_reset double precision,
   max_exec_time_ms_since_reset double precision,
@@ -232,7 +242,9 @@ AS $$
    GROUP BY database_target_id, userid, dbid, toplevel, queryid
  )
  SELECT d.database_target_id,d.database_name,d.userid,d.dbid,d.toplevel,
-        d.queryid,d.query,d.calls,d.total_exec_time_ms,d.mean_exec_time_ms,
+        d.queryid,d.query,
+        d.plans,d.total_plan_time_ms,d.mean_plan_time_ms,
+        d.calls,d.total_exec_time_ms,d.mean_exec_time_ms,
         e.min_exec_time,e.max_exec_time,
         wm.interval_min,wm.interval_max,
         d.rows,round(d.rows::numeric/nullif(d.calls,0),3),d.shared_blks_read,
@@ -834,6 +846,21 @@ BEGIN
       || ' * Min/max since reset: cumulative endpoint values since the last pg_stat_statements reset.</p>'
       || '<a class="back-to-top" href="#top">Back to top</a></section>';
   END LOOP;
+
+  SELECT coalesce(string_agg(format('<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td>'
+      || '<td>%s</td><td class="query">%s</td></tr>',
+      dba_mon._html_escape(database_name::text),queryid,plans,
+      round(total_plan_time_ms::numeric,3),round(mean_plan_time_ms::numeric,3),
+      calls,dba_mon._html_escape(left(query,500))),''),
+      '<tr><td colspan="7" class="empty">No planning time data — requires pg_stat_statements.track_planning = on</td></tr>') INTO v_rows
+  FROM (SELECT * FROM dba_mon.report_pgss_metrics(p_begin_snapshot_id,p_end_snapshot_id)
+        WHERE plans>0 ORDER BY total_plan_time_ms DESC NULLS LAST LIMIT 10) q;
+  v_html := v_html || '<section><h2>Top SQL by Total Planning Time</h2><div class="table-wrap"><table><thead><tr>'
+    || '<th>Database</th><th>Query ID</th><th>Plans</th><th>Total plan ms</th><th>Mean plan ms</th>'
+    || '<th>Calls</th><th>SQL text</th></tr></thead><tbody>'
+    || v_rows || '</tbody></table></div>'
+    || '<p class="sub">Requires pg_stat_statements.track_planning = on. Empty when planning statistics are not collected.</p>'
+    || '<a class="back-to-top" href="#top">Back to top</a></section>';
 
   SELECT coalesce(string_agg(format('<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td>'
       || '<td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>',
