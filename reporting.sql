@@ -256,7 +256,8 @@ CREATE OR REPLACE FUNCTION dba_mon.report_database_delta(
   blks_read bigint, blks_hit bigint, cache_hit_pct numeric,
   tup_returned bigint, tup_fetched bigint, tup_inserted bigint,
   tup_updated bigint, tup_deleted bigint, temp_files bigint,
-  temp_bytes bigint, deadlocks bigint, sessions bigint,
+  temp_bytes bigint, deadlocks bigint, checksum_failures bigint,
+  sessions bigint,
   sessions_abandoned bigint, sessions_fatal bigint, sessions_killed bigint
 )
 LANGUAGE sql STABLE SECURITY DEFINER
@@ -271,6 +272,7 @@ AS $$
          e.tup_inserted-b.tup_inserted, e.tup_updated-b.tup_updated,
          e.tup_deleted-b.tup_deleted, e.temp_files-b.temp_files,
          e.temp_bytes-b.temp_bytes, e.deadlocks-b.deadlocks,
+         e.checksum_failures-b.checksum_failures,
          e.sessions-b.sessions, e.sessions_abandoned-b.sessions_abandoned,
          e.sessions_fatal-b.sessions_fatal, e.sessions_killed-b.sessions_killed
   FROM dba_mon.database_snap b JOIN dba_mon.database_snap e USING(datid)
@@ -741,6 +743,25 @@ BEGIN
   v_html := v_html || '<section><h2>Database Workload</h2><div class="table-wrap"><table><thead><tr>'
     || '<th>Database</th><th>Commits</th><th>Rollbacks</th><th>Cache hit %</th><th>Inserts</th>'
     || '<th>Updates</th><th>Deletes</th><th>Temp files</th><th>Temp bytes</th>'
+    || '</tr></thead><tbody>' || v_rows || '</tbody></table></div><a class="back-to-top" href="#top">Back to top</a></section>';
+
+  SELECT coalesce(string_agg(format('<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>',
+      dba_mon._html_escape(coalesce(datname::text,'Shared objects')),
+      deadlocks,
+      coalesce(checksum_failures::text,'n/a'),
+      coalesce(sessions_abandoned::text,'n/a'),
+      coalesce(sessions_fatal::text,'n/a'),
+      coalesce(sessions_killed::text,'n/a')),''),
+      '<tr><td colspan="6" class="empty">No deadlocks or session errors in this interval</td></tr>') INTO v_rows
+  FROM dba_mon.report_database_delta(p_begin_snapshot_id,p_end_snapshot_id)
+  WHERE deadlocks > 0
+     OR coalesce(checksum_failures,0) > 0
+     OR coalesce(sessions_abandoned,0) > 0
+     OR coalesce(sessions_fatal,0) > 0
+     OR coalesce(sessions_killed,0) > 0;
+  v_html := v_html || '<section><h2>Deadlocks &amp; Session Errors</h2><div class="table-wrap"><table><thead><tr>'
+    || '<th>Database</th><th>Deadlocks</th><th>Checksum failures</th>'
+    || '<th>Sessions abandoned</th><th>Sessions fatal</th><th>Sessions killed</th>'
     || '</tr></thead><tbody>' || v_rows || '</tbody></table></div><a class="back-to-top" href="#top">Back to top</a></section>';
 
   SELECT * INTO r FROM dba_mon.system_snap WHERE snapshot_id=p_end_snapshot_id;
