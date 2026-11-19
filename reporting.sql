@@ -807,6 +807,22 @@ BEGIN
       || '</div></section>';
   END IF;
 
+  SELECT * INTO r FROM dba_mon.memory_snap WHERE snapshot_id = p_end_snapshot_id;
+  IF FOUND THEN
+    v_html := v_html || '<section><h2>Memory Configuration</h2><div class="grid">'
+      || format('<div class="card"><div class="label">Shared Buffers</div><div class="value">%s</div></div>',
+                pg_size_pretty(r.shared_buffers_bytes))
+      || format('<div class="card"><div class="label">Work Mem</div><div class="value">%s</div></div>',
+                pg_size_pretty(r.work_mem_bytes))
+      || format('<div class="card"><div class="label">Maintenance Work Mem</div><div class="value">%s</div></div>',
+                pg_size_pretty(r.maintenance_work_mem_bytes))
+      || format('<div class="card"><div class="label">Effective Cache Size</div><div class="value">%s</div></div>',
+                pg_size_pretty(r.effective_cache_size_bytes))
+      || coalesce(format('<div class="card"><div class="label">Total Shared Memory</div><div class="value">%s</div></div>',
+                         pg_size_pretty(r.shmem_total_bytes::bigint)),'')
+      || '</div></section>';
+  END IF;
+
   SELECT coalesce(string_agg(format('<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>',
       dba_mon._html_escape(s.started_at::text),
       ss.total_backends,ss.active_backends,

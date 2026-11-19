@@ -2,7 +2,7 @@
 
 \echo ''
 \echo '------------------------------------------------------------'
-\echo '  postgres-awr  |  upgrade to 1.3.9'
+\echo '  postgres-awr  |  upgrade to 1.4.0'
 \echo '------------------------------------------------------------'
 \echo ''
 
@@ -55,7 +55,7 @@ ALTER TABLE dba_mon.checkpointer_snap
   ALTER COLUMN num_done DROP NOT NULL;
 
 ALTER TABLE dba_mon.snapshot
-  ALTER COLUMN collector_version SET DEFAULT '1.3.9';
+  ALTER COLUMN collector_version SET DEFAULT '1.4.0';
 
 ALTER TABLE dba_mon.pgss_snap
   ADD COLUMN IF NOT EXISTS min_exec_time double precision NOT NULL DEFAULT 0,
@@ -74,6 +74,16 @@ CREATE TABLE IF NOT EXISTS dba_mon.wait_sample (
 CREATE INDEX IF NOT EXISTS ix_wait_sample_time
   ON dba_mon.wait_sample (cluster_id, sampled_at);
 
+CREATE TABLE IF NOT EXISTS dba_mon.memory_snap (
+  snapshot_id bigint PRIMARY KEY
+    REFERENCES dba_mon.snapshot(snapshot_id) ON DELETE CASCADE,
+  shared_buffers_bytes bigint NOT NULL,
+  work_mem_bytes bigint NOT NULL,
+  maintenance_work_mem_bytes bigint NOT NULL,
+  effective_cache_size_bytes bigint NOT NULL,
+  shmem_total_bytes bigint
+);
+
 -- Load all executable objects before recording the release version. Keeping
 -- these includes inside the transaction prevents a repository from claiming a
 -- new version when an adjacent deployment file is stale, missing, or invalid.
@@ -85,11 +95,11 @@ CREATE INDEX IF NOT EXISTS ix_wait_sample_time
 
 \echo '  [4/4]  recording version'
 INSERT INTO dba_mon.schema_version(version, description)
-VALUES ('1.3.9', 'Add BGWriter buffers_alloc and Connection Pressure Timeline')
+VALUES ('1.4.0', 'Add Memory Configuration section')
 ON CONFLICT (version) DO NOTHING;
 
 COMMIT;
 
 \echo ''
-\echo '  postgres-awr is now at version 1.3.9'
+\echo '  postgres-awr is now at version 1.4.0'
 \echo ''

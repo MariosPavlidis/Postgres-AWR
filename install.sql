@@ -253,6 +253,16 @@ CREATE TABLE IF NOT EXISTS dba_mon.bgwriter_snap (
   stats_reset timestamptz
 );
 
+CREATE TABLE IF NOT EXISTS dba_mon.memory_snap (
+  snapshot_id bigint PRIMARY KEY
+    REFERENCES dba_mon.snapshot(snapshot_id) ON DELETE CASCADE,
+  shared_buffers_bytes bigint NOT NULL,
+  work_mem_bytes bigint NOT NULL,
+  maintenance_work_mem_bytes bigint NOT NULL,
+  effective_cache_size_bytes bigint NOT NULL,
+  shmem_total_bytes bigint
+);
+
 CREATE TABLE IF NOT EXISTS dba_mon.archiver_snap (
   snapshot_id bigint PRIMARY KEY REFERENCES dba_mon.snapshot(snapshot_id) ON DELETE CASCADE,
   archived_count bigint NOT NULL,

@@ -197,6 +197,22 @@ BEGIN
   END;
 
   BEGIN
+    PERFORM dba_mon._component_begin(v_snapshot, 'memory');
+    INSERT INTO dba_mon.memory_snap
+    SELECT v_snapshot,
+           pg_size_bytes(current_setting('shared_buffers')),
+           pg_size_bytes(current_setting('work_mem')),
+           pg_size_bytes(current_setting('maintenance_work_mem')),
+           pg_size_bytes(current_setting('effective_cache_size')),
+           (SELECT sum(allocated_size) FROM pg_shmem_allocations);
+    GET DIAGNOSTICS v_rows = ROW_COUNT;
+    PERFORM dba_mon._component_end(v_snapshot,'memory',NULL,'SUCCESS',v_rows);
+  EXCEPTION WHEN OTHERS THEN
+    v_failures:=v_failures+1;
+    PERFORM dba_mon._component_end(v_snapshot,'memory',NULL,'FAILED',NULL,SQLSTATE,SQLERRM);
+  END;
+
+  BEGIN
     PERFORM dba_mon._component_begin(v_snapshot, 'archiver');
     INSERT INTO dba_mon.archiver_snap
     SELECT v_snapshot, archived_count, last_archived_wal, last_archived_time,
