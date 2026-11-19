@@ -810,8 +810,8 @@ BEGIN
   SELECT coalesce(string_agg(format('<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>',
       dba_mon._html_escape(s.started_at::text),
       ss.total_backends,ss.active_backends,
-      ss.idle_in_transaction_backends,ss.waiting_backends,ss.waiting_locks)
-    ORDER BY ss.snapshot_id,''),
+      ss.idle_in_transaction_backends,ss.waiting_backends,ss.waiting_locks),
+    '' ORDER BY ss.snapshot_id),
     '<tr><td colspan="6" class="empty">No system snapshots in this interval</td></tr>') INTO v_rows
   FROM dba_mon.system_snap ss
   JOIN dba_mon.snapshot s USING(snapshot_id)
