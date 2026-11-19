@@ -34,9 +34,56 @@ END
 $bridge$;
 
 \echo '  [2/4]  applying schema changes'
-ALTER TABLE dba_mon.snapshot
-  ALTER COLUMN collector_version SET DEFAULT '1.5.0';
 
+-- ── 1.4.0 ─────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS dba_mon.system_snap (
+  snapshot_id bigint PRIMARY KEY
+    REFERENCES dba_mon.snapshot(snapshot_id) ON DELETE CASCADE,
+  uptime_seconds numeric NOT NULL,
+  max_connections integer NOT NULL,
+  total_backends integer NOT NULL,
+  active_backends integer NOT NULL,
+  idle_in_transaction_backends integer NOT NULL,
+  waiting_backends integer NOT NULL,
+  granted_locks bigint NOT NULL,
+  waiting_locks bigint NOT NULL,
+  database_bytes numeric NOT NULL
+);
+
+ALTER TABLE dba_mon.database_snap
+  ALTER COLUMN datname DROP NOT NULL;
+
+ALTER TABLE dba_mon.checkpointer_snap
+  ALTER COLUMN num_done DROP NOT NULL;
+
+ALTER TABLE dba_mon.pgss_snap
+  ADD COLUMN IF NOT EXISTS min_exec_time double precision NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS max_exec_time double precision NOT NULL DEFAULT 0;
+
+CREATE TABLE IF NOT EXISTS dba_mon.wait_sample (
+  wait_sample_id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  cluster_id bigint NOT NULL REFERENCES dba_mon.cluster_target(cluster_id),
+  sampled_at timestamptz NOT NULL,
+  wait_event_type text NOT NULL,
+  wait_event text NOT NULL,
+  session_count integer NOT NULL CHECK (session_count >= 0),
+  blocked_session_count integer NOT NULL CHECK (blocked_session_count >= 0)
+);
+
+CREATE INDEX IF NOT EXISTS ix_wait_sample_time
+  ON dba_mon.wait_sample (cluster_id, sampled_at);
+
+CREATE TABLE IF NOT EXISTS dba_mon.memory_snap (
+  snapshot_id bigint PRIMARY KEY
+    REFERENCES dba_mon.snapshot(snapshot_id) ON DELETE CASCADE,
+  shared_buffers_bytes bigint NOT NULL,
+  work_mem_bytes bigint NOT NULL,
+  maintenance_work_mem_bytes bigint NOT NULL,
+  effective_cache_size_bytes bigint NOT NULL,
+  shmem_total_bytes bigint
+);
+
+-- ── 1.5.0 ─────────────────────────────────────────────────────────────────────
 ALTER TABLE dba_mon.wait_sample
   ADD COLUMN IF NOT EXISTS application_name text NOT NULL DEFAULT '';
 
@@ -101,8 +148,15 @@ CREATE TABLE IF NOT EXISTS dba_mon.autovacuum_snap (
 
 \echo '  [4/4]  recording version'
 INSERT INTO dba_mon.schema_version(version, description)
+VALUES ('1.4.0', 'Add Memory Configuration section')
+ON CONFLICT (version) DO NOTHING;
+
+INSERT INTO dba_mon.schema_version(version, description)
 VALUES ('1.5.0', 'Add session monitoring: long txn, conn profile, blocked sessions, autovacuum, wait sampler app_name, sidenav')
 ON CONFLICT (version) DO NOTHING;
+
+ALTER TABLE dba_mon.snapshot
+  ALTER COLUMN collector_version SET DEFAULT '1.5.0';
 
 COMMIT;
 
