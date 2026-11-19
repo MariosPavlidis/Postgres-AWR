@@ -660,14 +660,26 @@ BEGIN
   RETURN format('<svg class="wait-chart" viewBox="0 0 1100 275" role="img" aria-label="Average active sessions by wait event">'
     ||'<line x1="55" y1="35" x2="55" y2="245" stroke="#64748b"/>'
     ||'<line x1="55" y1="245" x2="850" y2="245" stroke="#64748b"/>'
+    ||'<line x1="55" y1="77" x2="850" y2="77" stroke="#dce3ec"/>'
+    ||'<line x1="55" y1="119" x2="850" y2="119" stroke="#dce3ec"/>'
+    ||'<line x1="55" y1="161" x2="850" y2="161" stroke="#dce3ec"/>'
+    ||'<line x1="55" y1="203" x2="850" y2="203" stroke="#dce3ec"/>'
     ||'<line x1="320" y1="35" x2="320" y2="245" stroke="#dce3ec"/>'
     ||'<line x1="585" y1="35" x2="585" y2="245" stroke="#dce3ec"/>'
-    ||'<text x="8" y="40" font-size="11">%s</text><text x="35" y="249" font-size="11">0</text>'
+    ||'<text x="8" y="40" font-size="11">%s</text>'
+    ||'<text x="50" y="81" font-size="11" text-anchor="end">%s</text>'
+    ||'<text x="50" y="123" font-size="11" text-anchor="end">%s</text>'
+    ||'<text x="50" y="165" font-size="11" text-anchor="end">%s</text>'
+    ||'<text x="50" y="207" font-size="11" text-anchor="end">%s</text>'
+    ||'<text x="35" y="249" font-size="11">0</text>'
     ||'<text x="55" y="265" font-size="11">%s</text>'
     ||'<text x="320" y="265" font-size="11" text-anchor="middle">%s</text>'
     ||'<text x="585" y="265" font-size="11" text-anchor="middle">%s</text>'
     ||'<text x="850" y="265" font-size="11" text-anchor="end">%s</text>'
-    ||'%s%s</svg>',v_max,to_char(i.begin_time,'HH24:MI:SS'),
+    ||'%s%s</svg>',v_max,
+    round(v_max::numeric*4/5),round(v_max::numeric*3/5),
+    round(v_max::numeric*2/5),round(v_max::numeric/5),
+    to_char(i.begin_time,'HH24:MI:SS'),
     to_char(i.begin_time+(i.end_time-i.begin_time)/3,'HH24:MI:SS'),
     to_char(i.begin_time+((i.end_time-i.begin_time)*2)/3,'HH24:MI:SS'),
     to_char(i.end_time,'HH24:MI:SS'),v_areas,v_legend);
@@ -853,8 +865,14 @@ BEGIN
   FROM (SELECT * FROM dba_mon.report_wait_summary(p_begin_snapshot_id,p_end_snapshot_id)
         ORDER BY sample_count DESC LIMIT 30) q;
   v_html := v_html || '<section><h2>Wait Event Summary</h2><div class="table-wrap"><table><thead><tr>'
-    || '<th>Wait type</th><th>Wait event</th><th>Session samples</th><th>Blocked samples</th>'
-    || '<th>Average active</th><th>Maximum active</th><th>First sample</th><th>Last sample</th>'
+    || '<th title="Wait event category (Lock, IO, CPU, LWLock, ...)">Wait type</th>'
+    || '<th title="Specific wait event name within the category">Wait event</th>'
+    || '<th title="Total 2-second samples where sessions were observed in this wait state">Session samples</th>'
+    || '<th title="Samples where a session had an active lock blocker (Lock wait type only)">Blocked samples</th>'
+    || '<th title="Average number of sessions per sample tick in this wait state">Average active</th>'
+    || '<th title="Peak concurrent sessions in this wait state across all samples">Maximum active</th>'
+    || '<th title="Timestamp of the first observed sample for this wait event">First sample</th>'
+    || '<th title="Timestamp of the most recent observed sample for this wait event">Last sample</th>'
     || '</tr></thead><tbody>' || v_rows || '</tbody></table></div>'
     || '<a class="back-to-top" href="#top">Back to top</a></section>';
 
