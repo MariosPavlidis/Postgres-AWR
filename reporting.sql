@@ -1,5 +1,6 @@
 \set ON_ERROR_STOP on
 
+DROP FUNCTION IF EXISTS dba_mon._html_escape(text);
 CREATE OR REPLACE FUNCTION dba_mon._html_escape(p_value text)
 RETURNS text
 LANGUAGE sql
@@ -8,6 +9,7 @@ PARALLEL SAFE
 RETURN replace(replace(replace(replace(replace(coalesce(p_value, ''),
   '&', '&amp;'), '<', '&lt;'), '>', '&gt;'), '"', '&quot;'), '''', '&#39;');
 
+DROP FUNCTION IF EXISTS dba_mon.report_interval(bigint,bigint);
 CREATE OR REPLACE FUNCTION dba_mon.report_interval(
   p_begin_snapshot_id bigint,
   p_end_snapshot_id bigint
@@ -71,6 +73,7 @@ BEGIN
 END;
 $$;
 
+DROP FUNCTION IF EXISTS dba_mon.report_quality(bigint,bigint);
 CREATE OR REPLACE FUNCTION dba_mon.report_quality(
   p_begin_snapshot_id bigint,
   p_end_snapshot_id bigint
@@ -132,6 +135,7 @@ AS $$
   SELECT checks.severity, checks.check_name, checks.message FROM checks;
 $$;
 
+DROP FUNCTION IF EXISTS dba_mon.report_pgss_delta(bigint,bigint);
 CREATE OR REPLACE FUNCTION dba_mon.report_pgss_delta(
   p_begin_snapshot_id bigint,
   p_end_snapshot_id bigint
@@ -261,6 +265,7 @@ AS $$
   AND wm.toplevel=d.toplevel AND wm.queryid=d.queryid;
 $$;
 
+DROP FUNCTION IF EXISTS dba_mon.report_database_delta(bigint,bigint);
 CREATE OR REPLACE FUNCTION dba_mon.report_database_delta(
   p_begin_snapshot_id bigint, p_end_snapshot_id bigint
 ) RETURNS TABLE (
@@ -301,6 +306,7 @@ AS $$
     AND e.temp_bytes>=b.temp_bytes AND e.deadlocks>=b.deadlocks;
 $$;
 
+DROP FUNCTION IF EXISTS dba_mon.report_wal_delta(bigint,bigint);
 CREATE OR REPLACE FUNCTION dba_mon.report_wal_delta(
   p_begin_snapshot_id bigint, p_end_snapshot_id bigint
 ) RETURNS TABLE (wal_records bigint, wal_fpi bigint, wal_bytes numeric,
@@ -320,6 +326,7 @@ AS $$
    AND e.wal_bytes>=b.wal_bytes AND e.wal_buffers_full>=b.wal_buffers_full;
 $$;
 
+DROP FUNCTION IF EXISTS dba_mon.report_checkpointer_delta(bigint,bigint);
 CREATE OR REPLACE FUNCTION dba_mon.report_checkpointer_delta(
   p_begin_snapshot_id bigint, p_end_snapshot_id bigint
 ) RETURNS TABLE (num_timed bigint, num_requested bigint, num_done bigint,
@@ -352,6 +359,7 @@ AS $$
    AND e.buffers_written>=b.buffers_written;
 $$;
 
+DROP FUNCTION IF EXISTS dba_mon.report_bgwriter_delta(bigint,bigint);
 CREATE OR REPLACE FUNCTION dba_mon.report_bgwriter_delta(
   p_begin_snapshot_id bigint, p_end_snapshot_id bigint
 ) RETURNS TABLE (buffers_clean bigint, maxwritten_clean bigint,
@@ -373,6 +381,7 @@ AS $$
    AND e.buffers_alloc>=b.buffers_alloc;
 $$;
 
+DROP FUNCTION IF EXISTS dba_mon.report_archiver_delta(bigint,bigint);
 CREATE OR REPLACE FUNCTION dba_mon.report_archiver_delta(
   p_begin_snapshot_id bigint, p_end_snapshot_id bigint
 ) RETURNS TABLE (archived_count bigint, failed_count bigint,
@@ -392,6 +401,7 @@ AS $$
    AND e.archived_count>=b.archived_count AND e.failed_count>=b.failed_count;
 $$;
 
+DROP FUNCTION IF EXISTS dba_mon.report_io_delta(bigint,bigint);
 CREATE OR REPLACE FUNCTION dba_mon.report_io_delta(
   p_begin_snapshot_id bigint, p_end_snapshot_id bigint
 ) RETURNS TABLE (backend_type text, object text, context text,
@@ -423,6 +433,7 @@ AS $$
    AND e.fsyncs>=b.fsyncs AND e.fsync_time>=b.fsync_time;
 $$;
 
+DROP FUNCTION IF EXISTS dba_mon.report_table_delta(bigint,bigint);
 CREATE OR REPLACE FUNCTION dba_mon.report_table_delta(
   p_begin_snapshot_id bigint, p_end_snapshot_id bigint
 ) RETURNS TABLE (database_target_id bigint, database_name name,
@@ -460,6 +471,7 @@ AS $$
    AND e.n_tup_del>=b.n_tup_del AND e.n_tup_hot_upd>=b.n_tup_hot_upd;
 $$;
 
+DROP FUNCTION IF EXISTS dba_mon.report_vacuum_delta(bigint,bigint);
 CREATE OR REPLACE FUNCTION dba_mon.report_vacuum_delta(
   p_begin_snapshot_id bigint, p_end_snapshot_id bigint
 ) RETURNS TABLE (database_target_id bigint, database_name name,
@@ -491,6 +503,7 @@ AS $$
    AND e.autoanalyze_count>=b.autoanalyze_count;
 $$;
 
+DROP FUNCTION IF EXISTS dba_mon.report_index_delta(bigint,bigint);
 CREATE OR REPLACE FUNCTION dba_mon.report_index_delta(
   p_begin_snapshot_id bigint, p_end_snapshot_id bigint
 ) RETURNS TABLE (database_target_id bigint, database_name name,
@@ -517,6 +530,7 @@ AS $$
    AND e.idx_tup_fetch>=b.idx_tup_fetch;
 $$;
 
+DROP FUNCTION IF EXISTS dba_mon.report_wait_summary(bigint,bigint);
 CREATE OR REPLACE FUNCTION dba_mon.report_wait_summary(
   p_begin_snapshot_id bigint, p_end_snapshot_id bigint
 ) RETURNS TABLE (wait_event_type text, wait_event text, sample_count bigint,
@@ -541,6 +555,7 @@ AS $$
  GROUP BY w.wait_event_type,w.wait_event,ticks.tick_count;
 $$;
 
+DROP FUNCTION IF EXISTS dba_mon.report_wait_chart(bigint,bigint);
 CREATE OR REPLACE FUNCTION dba_mon.report_wait_chart(
   p_begin_snapshot_id bigint, p_end_snapshot_id bigint
 ) RETURNS text
@@ -659,6 +674,7 @@ BEGIN
 END;
 $$;
 
+DROP FUNCTION IF EXISTS dba_mon.generate_html_report(bigint,bigint);
 CREATE OR REPLACE FUNCTION dba_mon.generate_html_report(
   p_begin_snapshot_id bigint,
   p_end_snapshot_id bigint

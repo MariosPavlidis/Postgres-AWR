@@ -1,8 +1,17 @@
 \set ON_ERROR_STOP on
-\echo 'Upgrading postgres-awr to 1.3.9'
+
+\echo ''
+\echo '------------------------------------------------------------'
+\echo '  postgres-awr  |  upgrade to 1.3.9'
+\echo '------------------------------------------------------------'
+\echo ''
 
 BEGIN;
 
+-- Suppress "already exists, skipping" notices from IF NOT EXISTS DDL.
+SET LOCAL client_min_messages = WARNING;
+
+\echo '  [1/4]  verifying installation'
 DO $bridge$
 DECLARE
   v_ext_schema name;
@@ -24,6 +33,7 @@ BEGIN
 END
 $bridge$;
 
+\echo '  [2/4]  applying schema changes'
 CREATE TABLE IF NOT EXISTS dba_mon.system_snap (
   snapshot_id bigint PRIMARY KEY
     REFERENCES dba_mon.snapshot(snapshot_id) ON DELETE CASCADE,
@@ -67,13 +77,19 @@ CREATE INDEX IF NOT EXISTS ix_wait_sample_time
 -- Load all executable objects before recording the release version. Keeping
 -- these includes inside the transaction prevents a repository from claiming a
 -- new version when an adjacent deployment file is stale, missing, or invalid.
+\echo '  [3/4]  loading executable objects'
 \ir capture.sql
 \ir waits.sql
 \ir retention.sql
 \ir reporting.sql
 
+\echo '  [4/4]  recording version'
 INSERT INTO dba_mon.schema_version(version, description)
 VALUES ('1.3.9', 'Add BGWriter buffers_alloc and Connection Pressure Timeline')
 ON CONFLICT (version) DO NOTHING;
 
 COMMIT;
+
+\echo ''
+\echo '  postgres-awr is now at version 1.3.9'
+\echo ''
