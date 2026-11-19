@@ -746,8 +746,8 @@ BEGIN
     || '<div class="grid">'
     || format('<div class="card"><div class="label">Cluster</div><div class="value">%s</div></div>',dba_mon._html_escape(i.cluster_name))
     || format('<div class="card"><div class="label">Snapshots</div><div class="value">%s → %s</div></div>',i.begin_snapshot_id,i.end_snapshot_id)
-    || format('<div class="card"><div class="label">Begin</div><div class="value">%s</div></div>',dba_mon._html_escape(i.begin_time::text))
-    || format('<div class="card"><div class="label">End</div><div class="value">%s</div></div>',dba_mon._html_escape(i.end_time::text))
+    || format('<div class="card"><div class="label">Begin (UTC)</div><div class="value">%s</div></div>',dba_mon._html_escape(to_char(i.begin_time AT TIME ZONE 'UTC','YYYY-MM-DD HH24:MI:SS')))
+    || format('<div class="card"><div class="label">End (UTC)</div><div class="value">%s</div></div>',dba_mon._html_escape(to_char(i.end_time AT TIME ZONE 'UTC','YYYY-MM-DD HH24:MI:SS')))
     || format('<div class="card"><div class="label">Duration</div><div class="value">%s seconds</div></div>',round(i.interval_seconds,2))
     || format('<div class="card"><div class="label">Mode</div><div class="value">%s</div></div>',CASE WHEN i.in_recovery THEN 'Standby' ELSE 'Primary' END)
     || format('<div class="card"><div class="label">Collector</div><div class="value">%s</div></div>',dba_mon._html_escape(i.collector_version))
