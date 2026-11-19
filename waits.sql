@@ -19,7 +19,7 @@ BEGIN
   WHERE enabled AND is_local;
 
   INSERT INTO dba_mon.wait_sample (
-    cluster_id,sampled_at,wait_event_type,wait_event,
+    cluster_id,sampled_at,wait_event_type,wait_event,application_name,
     session_count,blocked_session_count
   )
   SELECT
@@ -28,6 +28,7 @@ BEGIN
          ELSE coalesce(a.wait_event_type,'CPU') END,
     CASE WHEN a.state='idle in transaction' THEN 'Idle in transaction'
          ELSE coalesce(a.wait_event,'CPU') END,
+    coalesce(a.application_name,''),
     count(*)::integer,
     count(*) FILTER (WHERE a.state <> 'idle in transaction'
                         AND a.wait_event_type = 'Lock'
@@ -39,14 +40,15 @@ BEGIN
   GROUP BY CASE WHEN a.state='idle in transaction' THEN 'Idle in transaction'
                 ELSE coalesce(a.wait_event_type,'CPU') END,
            CASE WHEN a.state='idle in transaction' THEN 'Idle in transaction'
-                ELSE coalesce(a.wait_event,'CPU') END;
+                ELSE coalesce(a.wait_event,'CPU') END,
+           coalesce(a.application_name,'');
 
   GET DIAGNOSTICS v_rows = ROW_COUNT;
   IF v_rows=0 THEN
     INSERT INTO dba_mon.wait_sample (
-      cluster_id,sampled_at,wait_event_type,wait_event,
+      cluster_id,sampled_at,wait_event_type,wait_event,application_name,
       session_count,blocked_session_count
-    ) VALUES (v_cluster_id,v_sampled_at,'Idle','No active sessions',0,0);
+    ) VALUES (v_cluster_id,v_sampled_at,'Idle','No active sessions','',0,0);
   END IF;
 END;
 $$;

@@ -533,8 +533,8 @@ $$;
 DROP FUNCTION IF EXISTS dba_mon.report_wait_summary(bigint,bigint);
 CREATE OR REPLACE FUNCTION dba_mon.report_wait_summary(
   p_begin_snapshot_id bigint, p_end_snapshot_id bigint
-) RETURNS TABLE (wait_event_type text, wait_event text, sample_count bigint,
-  blocked_sample_count bigint, average_active_sessions numeric,
+) RETURNS TABLE (wait_event_type text, wait_event text, application_name text,
+  sample_count bigint, blocked_sample_count bigint, average_active_sessions numeric,
   maximum_active_sessions integer, first_sample timestamptz, last_sample timestamptz)
 LANGUAGE sql STABLE SECURITY DEFINER
 SET search_path = pg_catalog, dba_mon
@@ -545,14 +545,14 @@ AS $$
    FROM dba_mon.wait_sample w JOIN i ON i.cluster_id=w.cluster_id
    WHERE w.sampled_at>=i.begin_time AND w.sampled_at<=i.end_time
  )
- SELECT w.wait_event_type,w.wait_event,sum(w.session_count),
+ SELECT w.wait_event_type,w.wait_event,w.application_name,sum(w.session_count),
         sum(w.blocked_session_count),
         round(sum(w.session_count)::numeric/nullif(ticks.tick_count,0),3),
         max(w.session_count),min(w.sampled_at),max(w.sampled_at)
  FROM dba_mon.wait_sample w JOIN i ON i.cluster_id=w.cluster_id CROSS JOIN ticks
  WHERE w.sampled_at>=i.begin_time AND w.sampled_at<=i.end_time
    AND w.session_count>0
- GROUP BY w.wait_event_type,w.wait_event,ticks.tick_count;
+ GROUP BY w.wait_event_type,w.wait_event,w.application_name,ticks.tick_count;
 $$;
 
 DROP FUNCTION IF EXISTS dba_mon.report_wait_chart(bigint,bigint);
@@ -719,9 +719,19 @@ BEGIN
     || '<style>'
     || ':root{--bg:#f4f7fb;--card:#fff;--ink:#152238;--muted:#607087;--line:#dce3ec;'
     || '--blue:#2356a8;--ok:#18794e;--warn:#9a6700;--bad:#b42318}'
-    || '*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);'
+    || '*{box-sizing:border-box}body{display:flex;margin:0;background:var(--bg);color:var(--ink);'
     || 'font:14px/1.45 system-ui,-apple-system,Segoe UI,sans-serif}'
-    || 'main{max-width:1500px;margin:auto;padding:24px}h1{margin:0}h2{margin:28px 0 10px}'
+    || '.sidenav{width:220px;flex-shrink:0;position:sticky;top:0;height:100vh;overflow-y:auto;'
+    || 'background:#1e2a3a;border-right:1px solid var(--line);padding:8px 0;font-size:12px}'
+    || '.sidenav a{display:block;padding:3px 14px 3px 20px;color:#9db4cc;text-decoration:none;'
+    || 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border-left:2px solid transparent}'
+    || '.sidenav a:hover{color:#fff;border-left-color:var(--blue)}'
+    || '.sidenav details>summary{padding:6px 14px;color:#607a94;font-weight:700;font-size:10px;'
+    || 'text-transform:uppercase;letter-spacing:.06em;cursor:pointer;list-style:none;user-select:none}'
+    || '.sidenav details>summary::marker,.sidenav details>summary::-webkit-details-marker{display:none}'
+    || '.sidenav details>summary::before{content:''\25B8 '';font-size:9px}'
+    || '.sidenav details[open]>summary::before{content:''\25BE ''}'
+    || 'main{flex:1;min-width:0;max-width:1400px;padding:24px}h1{margin:0}h2{margin:28px 0 10px}'
     || '.sub{color:var(--muted);margin:4px 0 20px}.grid{display:grid;'
     || 'grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px}'
     || '.card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px}'
@@ -738,9 +748,59 @@ BEGIN
     || '.back-to-top{display:block;margin:7px 2px 0;text-align:right;font-size:12px}footer{margin:30px 0;color:var(--muted)}'
     || '.chart-wrap{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px}'
     || '.wait-chart{display:block;width:100%;height:auto;min-height:260px}'
-    || '@media print{body{background:#fff}main{max-width:none;padding:8px}.table-wrap{overflow:visible}'
+    || '@media print{.sidenav{display:none}main{max-width:none;padding:8px}.table-wrap{overflow:visible}'
     || 'th{position:static}section{break-inside:avoid}}'
-    || '</style></head><body><main>'
+    || '@media(max-width:900px){.sidenav{display:none}}'
+    || '</style></head><body>'
+    || '<nav class="sidenav">'
+    || '<a href="#top" style="padding:10px 14px;font-weight:700;font-size:13px;color:#fff">PostgreSQL AWR</a>'
+    || '<details open><summary>Instance</summary>'
+    || '<a href="#section-system-state">System State</a>'
+    || '<a href="#section-conn-profile">Connection Profile</a>'
+    || '<a href="#section-memory">Memory</a>'
+    || '<a href="#section-conn-pressure">Connection Pressure</a>'
+    || '</details>'
+    || '<details open><summary>Active Sessions</summary>'
+    || '<a href="#section-aas-chart">AAS Chart</a>'
+    || '<a href="#section-wait-summary">Wait Events</a>'
+    || '<a href="#section-long-txn">Long Transactions</a>'
+    || '<a href="#section-blocked">Blocked Sessions</a>'
+    || '</details>'
+    || '<details open><summary>SQL Performance</summary>'
+    || '<a href="#section-sql-total-exec-time-ms">By Total Time</a>'
+    || '<a href="#section-sql-calls">By Calls</a>'
+    || '<a href="#section-sql-mean-exec-time-ms">By Mean Time</a>'
+    || '<a href="#section-sql-shared-blks-read">By Blocks Read</a>'
+    || '<a href="#section-sql-temp-blks-written">By Temp Writes</a>'
+    || '<a href="#section-sql-wal-bytes">By WAL</a>'
+    || '<a href="#section-sql-rows">By Rows</a>'
+    || '</details>'
+    || '<details open><summary>Storage &amp; I/O</summary>'
+    || '<a href="#section-io">I/O Activity</a>'
+    || '<a href="#section-wal">WAL &amp; Checkpoints</a>'
+    || '</details>'
+    || '<details open><summary>Database</summary>'
+    || '<a href="#section-db-workload">Workload</a>'
+    || '<a href="#section-deadlocks">Deadlocks &amp; Errors</a>'
+    || '<a href="#section-autovacuum">Autovacuum</a>'
+    || '</details>'
+    || '<details open><summary>Tables &amp; Indexes</summary>'
+    || '<a href="#section-top-tables-reads">Top by Seq Scans</a>'
+    || '<a href="#section-top-tables-ops">Top by Writes</a>'
+    || '<a href="#section-top-tables-growth">Size Growth</a>'
+    || '<a href="#section-top-tables-vacuum">Vacuum Stats</a>'
+    || '<a href="#section-top-indexes-scans">Top by Scans</a>'
+    || '<a href="#section-unused-indexes">Unused Indexes</a>'
+    || '</details>'
+    || '<details open><summary>Replication</summary>'
+    || '<a href="#section-replication">Senders</a>'
+    || '<a href="#section-repl-slots">Slots</a>'
+    || '</details>'
+    || '<details open><summary>Diagnostics</summary>'
+    || '<a href="#section-capture-status">Capture Status</a>'
+    || '</details>'
+    || '</nav>'
+    || '<main>'
     || '<h1 id="top">PostgreSQL AWR Report</h1><p class="sub">AWR-inspired snapshot comparison</p>'
     || format('<div class="banner %s">Data quality: %s</div>',v_severity,upper(v_severity))
     || '<div class="grid">'
@@ -762,53 +822,9 @@ BEGIN
     || '<thead><tr><th>Severity</th><th>Check</th><th>Message</th></tr></thead><tbody>'
     || v_rows || '</tbody></table></div><a class="back-to-top" href="#top">Back to top</a></section>';
 
-  SELECT coalesce(sum(calls),0) calls,coalesce(sum(total_exec_time_ms),0) exec_ms,
-         coalesce(sum(rows),0) rows,coalesce(sum(shared_blks_read),0) reads,
-         coalesce(sum(temp_blks_written),0) temp,coalesce(sum(wal_bytes),0) wal
-  INTO r FROM dba_mon.report_pgss_delta(p_begin_snapshot_id,p_end_snapshot_id);
-  v_html := v_html || '<section><h2>Workload Profile</h2><div class="grid">'
-    || format('<div class="card"><div class="label">SQL calls</div><div class="value">%s</div></div>',r.calls)
-    || format('<div class="card"><div class="label">Calls/sec</div><div class="value">%s</div></div>',round((r.calls/NULLIF(i.interval_seconds,0))::numeric,2))
-    || format('<div class="card"><div class="label">SQL execution</div><div class="value">%s ms</div></div>',round(r.exec_ms::numeric,2))
-    || format('<div class="card"><div class="label">Rows</div><div class="value">%s</div></div>',r.rows)
-    || format('<div class="card"><div class="label">Shared block reads</div><div class="value">%s</div></div>',r.reads)
-    || format('<div class="card"><div class="label">Temp blocks written</div><div class="value">%s</div></div>',r.temp)
-    || format('<div class="card"><div class="label">SQL WAL</div><div class="value">%s</div></div>',pg_size_pretty(r.wal::bigint))
-    || '</div></section>';
-
-  SELECT coalesce(string_agg(format('<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td>'
-      || '<td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>',
-      dba_mon._html_escape(coalesce(datname::text,'Shared objects')),xact_commit,xact_rollback,
-      coalesce(cache_hit_pct::text,'n/a'),tup_inserted,tup_updated,tup_deleted,temp_files,
-      pg_size_pretty(temp_bytes)),''),'<tr><td colspan="9" class="empty">No valid database deltas</td></tr>') INTO v_rows
-  FROM dba_mon.report_database_delta(p_begin_snapshot_id,p_end_snapshot_id);
-  v_html := v_html || '<section><h2>Database Workload</h2><div class="table-wrap"><table><thead><tr>'
-    || '<th>Database</th><th>Commits</th><th>Rollbacks</th><th>Cache hit %</th><th>Inserts</th>'
-    || '<th>Updates</th><th>Deletes</th><th>Temp files</th><th>Temp bytes</th>'
-    || '</tr></thead><tbody>' || v_rows || '</tbody></table></div><a class="back-to-top" href="#top">Back to top</a></section>';
-
-  SELECT coalesce(string_agg(format('<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>',
-      dba_mon._html_escape(coalesce(datname::text,'Shared objects')),
-      deadlocks,
-      coalesce(checksum_failures::text,'n/a'),
-      coalesce(sessions_abandoned::text,'n/a'),
-      coalesce(sessions_fatal::text,'n/a'),
-      coalesce(sessions_killed::text,'n/a')),''),
-      '<tr><td colspan="6" class="empty">No deadlocks or session errors in this interval</td></tr>') INTO v_rows
-  FROM dba_mon.report_database_delta(p_begin_snapshot_id,p_end_snapshot_id)
-  WHERE deadlocks > 0
-     OR coalesce(checksum_failures,0) > 0
-     OR coalesce(sessions_abandoned,0) > 0
-     OR coalesce(sessions_fatal,0) > 0
-     OR coalesce(sessions_killed,0) > 0;
-  v_html := v_html || '<section><h2>Deadlocks &amp; Session Errors</h2><div class="table-wrap"><table><thead><tr>'
-    || '<th>Database</th><th>Deadlocks</th><th>Checksum failures</th>'
-    || '<th>Sessions abandoned</th><th>Sessions fatal</th><th>Sessions killed</th>'
-    || '</tr></thead><tbody>' || v_rows || '</tbody></table></div><a class="back-to-top" href="#top">Back to top</a></section>';
-
   SELECT * INTO r FROM dba_mon.system_snap WHERE snapshot_id=p_end_snapshot_id;
   IF FOUND THEN
-    v_html := v_html || '<section><h2>End Snapshot System State</h2><div class="grid">'
+    v_html := v_html || '<section id="section-system-state"><h2>End Snapshot System State</h2><div class="grid">'
       || format('<div class="card"><div class="label">Uptime</div><div class="value">%s seconds</div></div>',round(r.uptime_seconds))
       || format('<div class="card"><div class="label">Connections</div><div class="value">%s / %s</div></div>',r.total_backends,r.max_connections)
       || format('<div class="card"><div class="label">Active</div><div class="value">%s</div></div>',r.active_backends)
@@ -819,9 +835,21 @@ BEGIN
       || '</div></section>';
   END IF;
 
+  SELECT coalesce(string_agg(format('<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>',
+      dba_mon._html_escape(application_name),dba_mon._html_escape(usename::text),
+      dba_mon._html_escape(state),session_count),
+    '' ORDER BY session_count DESC),
+    '<tr><td colspan="4" class="empty">No connection profile data at end snapshot</td></tr>') INTO v_rows
+  FROM dba_mon.conn_profile_snap
+  WHERE snapshot_id = p_end_snapshot_id;
+  v_html := v_html || '<section id="section-conn-profile"><h2>Connection Profile</h2><div class="table-wrap"><table><thead><tr>'
+    || '<th>Application</th><th>User</th><th>State</th><th>Sessions</th>'
+    || '</tr></thead><tbody>' || v_rows || '</tbody></table></div>'
+    || '<a class="back-to-top" href="#top">Back to top</a></section>';
+
   SELECT * INTO r FROM dba_mon.memory_snap WHERE snapshot_id = p_end_snapshot_id;
   IF FOUND THEN
-    v_html := v_html || '<section><h2>Memory Configuration</h2><div class="grid">'
+    v_html := v_html || '<section id="section-memory"><h2>Memory Configuration</h2><div class="grid">'
       || format('<div class="card"><div class="label">Shared Buffers</div><div class="value">%s</div></div>',
                 pg_size_pretty(r.shared_buffers_bytes))
       || format('<div class="card"><div class="label">Work Mem</div><div class="value">%s</div></div>',
@@ -844,35 +872,86 @@ BEGIN
   FROM dba_mon.system_snap ss
   JOIN dba_mon.snapshot s USING(snapshot_id)
   WHERE ss.snapshot_id BETWEEN p_begin_snapshot_id AND p_end_snapshot_id;
-  v_html := v_html || '<section><h2>Connection Pressure Timeline</h2><div class="table-wrap"><table><thead><tr>'
+  v_html := v_html || '<section id="section-conn-pressure"><h2>Connection Pressure Timeline</h2><div class="table-wrap"><table><thead><tr>'
     || '<th>Snapshot time</th><th>Total</th><th>Active</th>'
     || '<th>Idle in txn</th><th>Waiting</th><th>Waiting locks</th>'
     || '</tr></thead><tbody>' || v_rows || '</tbody></table></div>'
     || '<a class="back-to-top" href="#top">Back to top</a></section>';
 
-  v_html := v_html || '<section><h2>Average Active Sessions by Wait Event</h2>'
+  v_html := v_html || '<section id="section-aas-chart"><h2>Average Active Sessions by Wait Event</h2>'
     || '<p class="sub">Two-second samples. CPU represents active sessions without a PostgreSQL wait event; idle-in-transaction sessions are shown separately in grey.</p>'
     || '<div class="chart-wrap">'
     || dba_mon.report_wait_chart(p_begin_snapshot_id,p_end_snapshot_id)
     || '</div></section>';
 
-  SELECT coalesce(string_agg(format('<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td>'
+  SELECT coalesce(string_agg(format('<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td>'
       || '<td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>',
-      dba_mon._html_escape(wait_event_type),dba_mon._html_escape(wait_event),sample_count,
-      blocked_sample_count,average_active_sessions,maximum_active_sessions,
+      dba_mon._html_escape(wait_event_type),dba_mon._html_escape(wait_event),
+      dba_mon._html_escape(application_name),
+      sample_count,blocked_sample_count,average_active_sessions,maximum_active_sessions,
       dba_mon._html_escape(first_sample::text),dba_mon._html_escape(last_sample::text)),''),
-      '<tr><td colspan="8" class="empty">No wait samples in this interval</td></tr>') INTO v_rows
+      '<tr><td colspan="9" class="empty">No wait samples in this interval</td></tr>') INTO v_rows
   FROM (SELECT * FROM dba_mon.report_wait_summary(p_begin_snapshot_id,p_end_snapshot_id)
         ORDER BY sample_count DESC LIMIT 30) q;
-  v_html := v_html || '<section><h2>Wait Event Summary</h2><div class="table-wrap"><table><thead><tr>'
+  v_html := v_html || '<section id="section-wait-summary"><h2>Wait Event Summary</h2><div class="table-wrap"><table><thead><tr>'
     || '<th title="Wait event category (Lock, IO, CPU, LWLock, ...)">Wait type</th>'
     || '<th title="Specific wait event name within the category">Wait event</th>'
+    || '<th title="Application name from pg_stat_activity.application_name">Application</th>'
     || '<th title="Total 2-second samples where sessions were observed in this wait state">Session samples</th>'
     || '<th title="Samples where a session had an active lock blocker (Lock wait type only)">Blocked samples</th>'
     || '<th title="Average number of sessions per sample tick in this wait state">Average active</th>'
     || '<th title="Peak concurrent sessions in this wait state across all samples">Maximum active</th>'
     || '<th title="Timestamp of the first observed sample for this wait event">First sample</th>'
     || '<th title="Timestamp of the most recent observed sample for this wait event">Last sample</th>'
+    || '</tr></thead><tbody>' || v_rows || '</tbody></table></div>'
+    || '<a class="back-to-top" href="#top">Back to top</a></section>';
+
+  SELECT coalesce(string_agg(format(
+      '<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td>'
+      || '<td>%s</td><td>%s</td><td>%s</td><td class="query">%s</td></tr>',
+      round(xact_age_seconds),
+      dba_mon._html_escape(coalesce(state,'')),
+      dba_mon._html_escape(coalesce(usename::text,'')),
+      dba_mon._html_escape(coalesce(application_name,'')),
+      dba_mon._html_escape(coalesce(client_addr::text,'')),
+      dba_mon._html_escape(to_char(xact_start AT TIME ZONE 'UTC','YYYY-MM-DD HH24:MI:SS')),
+      dba_mon._html_escape(coalesce(wait_event_type,'')),
+      dba_mon._html_escape(coalesce(wait_event,'')),
+      dba_mon._html_escape(coalesce(query_text,''))),
+    '' ORDER BY xact_age_seconds DESC),
+    '<tr><td colspan="9" class="empty">No long-running transactions at end snapshot</td></tr>') INTO v_rows
+  FROM dba_mon.long_txn_snap
+  WHERE snapshot_id = p_end_snapshot_id;
+  v_html := v_html || '<section id="section-long-txn"><h2>Long-Running Transactions</h2><div class="table-wrap"><table><thead><tr>'
+    || '<th>Age (s)</th><th>State</th><th>User</th><th>Application</th><th>Client</th>'
+    || '<th>Xact started (UTC)</th><th>Wait type</th><th>Wait event</th><th>Query text</th>'
+    || '</tr></thead><tbody>' || v_rows || '</tbody></table></div>'
+    || '<a class="back-to-top" href="#top">Back to top</a></section>';
+
+  SELECT coalesce(string_agg(format(
+      '<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td>'
+      || '<td class="query">%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td class="query">%s</td></tr>',
+      round(blocked_seconds),
+      waiter_pid,
+      dba_mon._html_escape(coalesce(waiter_usename::text,'')),
+      dba_mon._html_escape(coalesce(waiter_app,'')),
+      dba_mon._html_escape(coalesce(waiter_wait_event_type,'')),
+      dba_mon._html_escape(coalesce(waiter_wait_event,'')),
+      dba_mon._html_escape(coalesce(waiter_query,'')),
+      coalesce(blocker_pid::text,''),
+      dba_mon._html_escape(coalesce(blocker_usename::text,'')),
+      dba_mon._html_escape(coalesce(blocker_app,'')),
+      dba_mon._html_escape(coalesce(blocker_state,'')),
+      dba_mon._html_escape(coalesce(blocker_query,''))),
+    '' ORDER BY blocked_seconds DESC),
+    '<tr><td colspan="12" class="empty">No blocked sessions at end snapshot</td></tr>') INTO v_rows
+  FROM dba_mon.blocked_session_snap
+  WHERE snapshot_id = p_end_snapshot_id;
+  v_html := v_html || '<section id="section-blocked"><h2>Blocked Sessions</h2><div class="table-wrap"><table><thead><tr>'
+    || '<th>Blocked (s)</th><th>Waiter PID</th><th>User</th><th>App</th>'
+    || '<th>Wait type</th><th>Wait event</th><th>Waiter query</th>'
+    || '<th>Blocker PID</th><th>Blocker user</th><th>Blocker app</th>'
+    || '<th>Blocker state</th><th>Blocker query</th>'
     || '</tr></thead><tbody>' || v_rows || '</tbody></table></div>'
     || '<a class="back-to-top" href="#top">Back to top</a></section>';
 
@@ -901,7 +980,7 @@ BEGIN
       FROM (SELECT * FROM dba_mon.report_pgss_metrics($1,$2)
             WHERE calls>0 ORDER BY %I DESC NULLS LAST LIMIT 10) q
     $q$,v_metric) INTO v_rows USING p_begin_snapshot_id,p_end_snapshot_id;
-    v_html := v_html || format('<section><h2>%s</h2><div class="table-wrap"><table><thead><tr>',v_title)
+    v_html := v_html || format('<section id="section-sql-%s"><h2>%s</h2><div class="table-wrap"><table><thead><tr>',replace(v_metric,'_','-'),v_title)
       || '<th>Database</th><th>Query ID</th><th>Calls</th><th>Total ms</th><th>Mean ms</th>'
       || '<th>Min ms†</th><th>Max ms†</th><th>Min ms*</th><th>Max ms*</th>'
       || '<th>Rows</th><th>Avg rows/call</th>'
@@ -936,14 +1015,14 @@ BEGIN
       '<tr><td colspan="12" class="empty">No valid I/O deltas</td></tr>') INTO v_rows
   FROM (SELECT * FROM dba_mon.report_io_delta(p_begin_snapshot_id,p_end_snapshot_id)
         ORDER BY read_bytes+write_bytes DESC LIMIT 30) q;
-  v_html := v_html || '<section><h2>I/O Profile</h2><div class="table-wrap"><table><thead><tr>'
+  v_html := v_html || '<section id="section-io"><h2>I/O Activity</h2><div class="table-wrap"><table><thead><tr>'
     || '<th>Backend</th><th>Object</th><th>Context</th><th>Reads</th><th>Read bytes</th>'
     || '<th>Writes</th><th>Write bytes</th><th>I/O time ms</th>'
     || '<th>Extends</th><th>Extend bytes</th><th>Fsyncs</th><th>Fsync time ms</th></tr></thead><tbody>'
     || v_rows || '</tbody></table></div><a class="back-to-top" href="#top">Back to top</a></section>';
 
   SELECT * INTO r FROM dba_mon.report_wal_delta(p_begin_snapshot_id,p_end_snapshot_id);
-  v_html := v_html || '<section><h2>WAL and Checkpoints</h2><div class="grid">';
+  v_html := v_html || '<section id="section-wal"><h2>WAL and Checkpoints</h2><div class="grid">';
   IF FOUND THEN v_html := v_html
     || format('<div class="card"><div class="label">WAL generated</div><div class="value">%s</div></div>',pg_size_pretty(r.wal_bytes::bigint))
     || format('<div class="card"><div class="label">WAL records</div><div class="value">%s</div></div>',r.wal_records)
@@ -973,13 +1052,55 @@ BEGIN
   END IF;
 
   SELECT coalesce(string_agg(format('<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td>'
+      || '<td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>',
+      dba_mon._html_escape(coalesce(datname::text,'Shared objects')),xact_commit,xact_rollback,
+      coalesce(cache_hit_pct::text,'n/a'),tup_inserted,tup_updated,tup_deleted,temp_files,
+      pg_size_pretty(temp_bytes)),''),'<tr><td colspan="9" class="empty">No valid database deltas</td></tr>') INTO v_rows
+  FROM dba_mon.report_database_delta(p_begin_snapshot_id,p_end_snapshot_id);
+  v_html := v_html || '<section id="section-db-workload"><h2>Database Workload</h2><div class="table-wrap"><table><thead><tr>'
+    || '<th>Database</th><th>Commits</th><th>Rollbacks</th><th>Cache hit %</th><th>Inserts</th>'
+    || '<th>Updates</th><th>Deletes</th><th>Temp files</th><th>Temp bytes</th>'
+    || '</tr></thead><tbody>' || v_rows || '</tbody></table></div><a class="back-to-top" href="#top">Back to top</a></section>';
+
+  SELECT coalesce(string_agg(format('<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>',
+      dba_mon._html_escape(coalesce(datname::text,'Shared objects')),
+      deadlocks,
+      coalesce(checksum_failures::text,'n/a'),
+      coalesce(sessions_abandoned::text,'n/a'),
+      coalesce(sessions_fatal::text,'n/a'),
+      coalesce(sessions_killed::text,'n/a')),''),
+      '<tr><td colspan="6" class="empty">No deadlocks or session errors in this interval</td></tr>') INTO v_rows
+  FROM dba_mon.report_database_delta(p_begin_snapshot_id,p_end_snapshot_id)
+  WHERE deadlocks > 0
+     OR coalesce(checksum_failures,0) > 0
+     OR coalesce(sessions_abandoned,0) > 0
+     OR coalesce(sessions_fatal,0) > 0
+     OR coalesce(sessions_killed,0) > 0;
+  v_html := v_html || '<section id="section-deadlocks"><h2>Deadlocks &amp; Session Errors</h2><div class="table-wrap"><table><thead><tr>'
+    || '<th>Database</th><th>Deadlocks</th><th>Checksum failures</th>'
+    || '<th>Sessions abandoned</th><th>Sessions fatal</th><th>Sessions killed</th>'
+    || '</tr></thead><tbody>' || v_rows || '</tbody></table></div><a class="back-to-top" href="#top">Back to top</a></section>';
+
+  SELECT coalesce(string_agg(format('<tr><td>%s</td><td>%s</td><td class="query">%s</td></tr>',
+      round(duration_seconds),pid,
+      dba_mon._html_escape(coalesce(query,''))),
+    '' ORDER BY duration_seconds DESC),
+    '<tr><td colspan="3" class="empty">No autovacuum workers active at end snapshot</td></tr>') INTO v_rows
+  FROM dba_mon.autovacuum_snap
+  WHERE snapshot_id = p_end_snapshot_id;
+  v_html := v_html || '<section id="section-autovacuum"><h2>Autovacuum Activity</h2><div class="table-wrap"><table><thead><tr>'
+    || '<th>Duration (s)</th><th>PID</th><th>Operation</th>'
+    || '</tr></thead><tbody>' || v_rows || '</tbody></table></div>'
+    || '<a class="back-to-top" href="#top">Back to top</a></section>';
+
+  SELECT coalesce(string_agg(format('<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td>'
       || '<td>%s</td><td>%s</td></tr>',dba_mon._html_escape(database_name::text),
       dba_mon._html_escape(schemaname::text),dba_mon._html_escape(relname::text),
       seq_scan,seq_tup_read,idx_scan,pg_size_pretty(total_relation_size)),''),
       '<tr><td colspan="7" class="empty">No valid table deltas</td></tr>') INTO v_rows
   FROM (SELECT * FROM dba_mon.report_table_delta(p_begin_snapshot_id,p_end_snapshot_id)
         WHERE seq_scan>0 ORDER BY seq_scan DESC LIMIT 10) q;
-  v_html := v_html || '<section><h2>Top Tables by Sequential Scans</h2><div class="table-wrap"><table><thead><tr>'
+  v_html := v_html || '<section id="section-top-tables-reads"><h2>Top Tables by Sequential Scans</h2><div class="table-wrap"><table><thead><tr>'
     || '<th>Database</th><th>Schema</th><th>Table</th><th>Seq scans</th><th>Seq rows read</th>'
     || '<th>Index scans</th><th>Size</th></tr></thead><tbody>'
     || v_rows || '</tbody></table></div><a class="back-to-top" href="#top">Back to top</a></section>';
@@ -991,7 +1112,7 @@ BEGIN
       '<tr><td colspan="8" class="empty">No valid table deltas</td></tr>') INTO v_rows
   FROM (SELECT * FROM dba_mon.report_table_delta(p_begin_snapshot_id,p_end_snapshot_id)
         WHERE inserts+updates+deletes>0 ORDER BY inserts+updates+deletes DESC LIMIT 10) q;
-  v_html := v_html || '<section><h2>Top Tables by Writes</h2><div class="table-wrap"><table><thead><tr>'
+  v_html := v_html || '<section id="section-top-tables-ops"><h2>Top Tables by Writes</h2><div class="table-wrap"><table><thead><tr>'
     || '<th>Database</th><th>Schema</th><th>Table</th><th>Inserts</th><th>Updates</th>'
     || '<th>Deletes</th><th>HOT updates</th><th>Size</th></tr></thead><tbody>'
     || v_rows || '</tbody></table></div><a class="back-to-top" href="#top">Back to top</a></section>';
@@ -1032,7 +1153,7 @@ BEGIN
       '<tr><td colspan="5" class="empty">No table size growth in this interval</td></tr>') INTO v_rows
   FROM (SELECT * FROM dba_mon.report_table_delta(p_begin_snapshot_id,p_end_snapshot_id)
         WHERE size_growth>0 ORDER BY size_growth DESC LIMIT 10) q;
-  v_html := v_html || '<section><h2>Top Tables by Size Growth</h2><div class="table-wrap"><table><thead><tr>'
+  v_html := v_html || '<section id="section-top-tables-growth"><h2>Top Tables by Size Growth</h2><div class="table-wrap"><table><thead><tr>'
     || '<th>Database</th><th>Schema</th><th>Table</th><th>End size</th><th>Growth</th>'
     || '</tr></thead><tbody>' || v_rows || '</tbody></table></div>'
     || '<a class="back-to-top" href="#top">Back to top</a></section>';
@@ -1046,7 +1167,7 @@ BEGIN
       '<tr><td colspan="10" class="empty">No valid vacuum statistics</td></tr>') INTO v_rows
   FROM (SELECT * FROM dba_mon.report_vacuum_delta(p_begin_snapshot_id,p_end_snapshot_id)
         ORDER BY vacuum_count+autovacuum_count DESC,dead_tuples DESC LIMIT 20) q;
-  v_html := v_html || '<section><h2>Vacuum and Analyze Statistics</h2><div class="table-wrap"><table><thead><tr>'
+  v_html := v_html || '<section id="section-top-tables-vacuum"><h2>Vacuum and Analyze Statistics</h2><div class="table-wrap"><table><thead><tr>'
     || '<th>Database</th><th>Schema</th><th>Table</th><th>Manual vacuum</th><th>Autovacuum</th>'
     || '<th>Manual analyze</th><th>Autoanalyze</th><th>Dead tuples</th><th>Changes since analyze</th>'
     || '<th>Last vacuum</th></tr></thead><tbody>' || v_rows || '</tbody></table></div>'
@@ -1061,7 +1182,7 @@ BEGIN
       '<tr><td colspan="9" class="empty">No valid index deltas</td></tr>') INTO v_rows
   FROM (SELECT * FROM dba_mon.report_index_delta(p_begin_snapshot_id,p_end_snapshot_id)
         ORDER BY idx_scan DESC,index_size DESC LIMIT 20) q;
-  v_html := v_html || '<section><h2>Index Activity</h2><div class="table-wrap"><table><thead><tr>'
+  v_html := v_html || '<section id="section-top-indexes-scans"><h2>Index Activity</h2><div class="table-wrap"><table><thead><tr>'
     || '<th>Database</th><th>Schema</th><th>Index</th><th>Table</th><th>Scans</th>'
     || '<th>Entries read</th><th>Tuples fetched</th>'
     || '<th>Size</th><th>Last scan</th></tr></thead><tbody>' || v_rows || '</tbody></table></div>'
@@ -1076,7 +1197,7 @@ BEGIN
   FROM (SELECT * FROM dba_mon.report_index_delta(p_begin_snapshot_id,p_end_snapshot_id)
         WHERE idx_scan=0
         ORDER BY index_size DESC LIMIT 20) q;
-  v_html := v_html || '<section><h2>Unused Indexes</h2><div class="table-wrap"><table><thead><tr>'
+  v_html := v_html || '<section id="section-unused-indexes"><h2>Unused Indexes</h2><div class="table-wrap"><table><thead><tr>'
     || '<th>Database</th><th>Schema</th><th>Index</th><th>Table</th>'
     || '<th>Size</th><th>Last scan</th></tr></thead><tbody>' || v_rows || '</tbody></table></div>'
     || '<p class="sub">Indexes with zero scans during the report interval, largest first.'
@@ -1091,7 +1212,7 @@ BEGIN
       dba_mon._html_escape(coalesce(replay_lag::text,'—'))),''),
       '<tr><td colspan="7" class="empty">No replication senders (normal for standalone servers)</td></tr>') INTO v_rows
   FROM dba_mon.replication_snap WHERE snapshot_id=p_end_snapshot_id;
-  v_html := v_html || '<section><h2>Replication at End Snapshot</h2><div class="table-wrap"><table><thead><tr>'
+  v_html := v_html || '<section id="section-replication"><h2>Replication at End Snapshot</h2><div class="table-wrap"><table><thead><tr>'
     || '<th>Application</th><th>Client</th><th>State</th><th>Sync state</th>'
     || '<th>Write lag</th><th>Flush lag</th><th>Replay lag</th>'
     || '</tr></thead><tbody>' || v_rows || '</tbody></table></div><a class="back-to-top" href="#top">Back to top</a></section>';
@@ -1101,7 +1222,7 @@ BEGIN
       dba_mon._html_escape(coalesce(wal_status,'')),coalesce(pg_size_pretty(safe_wal_size),'')),''),
       '<tr><td colspan="5" class="empty">No replication slots</td></tr>') INTO v_rows
   FROM dba_mon.slot_snap WHERE snapshot_id=p_end_snapshot_id;
-  v_html := v_html || '<section><h2>Replication Slots at End Snapshot</h2><div class="table-wrap"><table><thead><tr>'
+  v_html := v_html || '<section id="section-repl-slots"><h2>Replication Slots at End Snapshot</h2><div class="table-wrap"><table><thead><tr>'
     || '<th>Slot</th><th>Type</th><th>Active</th><th>WAL status</th><th>Safe WAL size</th>'
     || '</tr></thead><tbody>' || v_rows || '</tbody></table></div><a class="back-to-top" href="#top">Back to top</a></section>';
 
@@ -1110,7 +1231,7 @@ BEGIN
       dba_mon._html_escape(coalesce(error_sqlstate||': ','')||coalesce(error_message,''))),''),
       '<tr><td colspan="5" class="empty">No component diagnostics</td></tr>') INTO v_rows
   FROM dba_mon.capture_component WHERE snapshot_id IN (p_begin_snapshot_id,p_end_snapshot_id);
-  v_html := v_html || '<section><h2>Capture Diagnostics</h2><div class="table-wrap"><table><thead><tr>'
+  v_html := v_html || '<section id="section-capture-status"><h2>Capture Diagnostics</h2><div class="table-wrap"><table><thead><tr>'
     || '<th>Snapshot</th><th>Component</th><th>Status</th><th>Rows</th><th>Message</th>'
     || '</tr></thead><tbody>' || v_rows || '</tbody></table></div><a class="back-to-top" href="#top">Back to top</a></section>'
     || format('<footer>Generated at %s by postgres-awr %s. Deltas are valid only where counters and reset markers are stable.</footer>',

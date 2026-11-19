@@ -75,6 +75,19 @@ BEGIN
          pg_size_bytes(current_setting('wal_segment_size'))::integer
   RETURNING snapshot_id INTO v_snapshot;
 
+  -- Materialize pg_stat_activity for all activity-based components (consistent point-in-time)
+  DROP TABLE IF EXISTS _act_snap;
+  CREATE TEMP TABLE _act_snap ON COMMIT DROP AS
+    SELECT clock_timestamp()                   AS snap_time,
+           pid, usename, application_name, client_addr,
+           backend_start, xact_start, query_start, state_change,
+           state, wait_event_type, wait_event,
+           left(query, 500)                    AS query_text,
+           backend_type,
+           pg_blocking_pids(pid)               AS blocking_pids
+    FROM pg_stat_activity
+    WHERE pid <> pg_backend_pid();
+
   BEGIN
     PERFORM dba_mon._component_begin(v_snapshot, 'system');
     INSERT INTO dba_mon.system_snap
@@ -210,6 +223,80 @@ BEGIN
   EXCEPTION WHEN OTHERS THEN
     v_failures:=v_failures+1;
     PERFORM dba_mon._component_end(v_snapshot,'memory',NULL,'FAILED',NULL,SQLSTATE,SQLERRM);
+  END;
+
+  BEGIN
+    PERFORM dba_mon._component_begin(v_snapshot, 'long_txn');
+    INSERT INTO dba_mon.long_txn_snap
+    SELECT v_snapshot, pid, usename, application_name, client_addr,
+           xact_start,
+           extract(epoch FROM snap_time - xact_start)::numeric,
+           query_start, state, wait_event_type, wait_event, query_text
+    FROM _act_snap
+    WHERE backend_type = 'client backend'
+      AND xact_start IS NOT NULL
+    ORDER BY xact_start
+    LIMIT 50;
+    GET DIAGNOSTICS v_rows = ROW_COUNT;
+    PERFORM dba_mon._component_end(v_snapshot,'long_txn',NULL,'SUCCESS',v_rows);
+  EXCEPTION WHEN OTHERS THEN
+    v_failures:=v_failures+1;
+    PERFORM dba_mon._component_end(v_snapshot,'long_txn',NULL,'FAILED',NULL,SQLSTATE,SQLERRM);
+  END;
+
+  BEGIN
+    PERFORM dba_mon._component_begin(v_snapshot, 'conn_profile');
+    INSERT INTO dba_mon.conn_profile_snap
+    SELECT v_snapshot,
+           coalesce(application_name,''),
+           coalesce(usename,''),
+           coalesce(state,'unknown'),
+           count(*)::integer
+    FROM _act_snap
+    WHERE backend_type = 'client backend'
+    GROUP BY application_name, usename, state;
+    GET DIAGNOSTICS v_rows = ROW_COUNT;
+    PERFORM dba_mon._component_end(v_snapshot,'conn_profile',NULL,'SUCCESS',v_rows);
+  EXCEPTION WHEN OTHERS THEN
+    v_failures:=v_failures+1;
+    PERFORM dba_mon._component_end(v_snapshot,'conn_profile',NULL,'FAILED',NULL,SQLSTATE,SQLERRM);
+  END;
+
+  BEGIN
+    PERFORM dba_mon._component_begin(v_snapshot, 'blocked_sessions');
+    INSERT INTO dba_mon.blocked_session_snap
+    SELECT v_snapshot,
+           w.pid, w.usename, w.application_name,
+           w.wait_event_type, w.wait_event, w.query_text,
+           extract(epoch FROM w.snap_time - w.state_change)::numeric,
+           b.pid, b.usename, b.application_name, b.state, b.query_text
+    FROM _act_snap w
+    CROSS JOIN LATERAL (
+      SELECT pid FROM unnest(w.blocking_pids) AS t(pid) LIMIT 1
+    ) first_blocker
+    JOIN _act_snap b ON b.pid = first_blocker.pid
+    WHERE w.backend_type = 'client backend'
+      AND cardinality(w.blocking_pids) > 0;
+    GET DIAGNOSTICS v_rows = ROW_COUNT;
+    PERFORM dba_mon._component_end(v_snapshot,'blocked_sessions',NULL,'SUCCESS',v_rows);
+  EXCEPTION WHEN OTHERS THEN
+    v_failures:=v_failures+1;
+    PERFORM dba_mon._component_end(v_snapshot,'blocked_sessions',NULL,'FAILED',NULL,SQLSTATE,SQLERRM);
+  END;
+
+  BEGIN
+    PERFORM dba_mon._component_begin(v_snapshot, 'autovacuum');
+    INSERT INTO dba_mon.autovacuum_snap
+    SELECT v_snapshot, pid, query_text,
+           extract(epoch FROM snap_time - query_start)::numeric
+    FROM _act_snap
+    WHERE backend_type = 'autovacuum worker'
+      AND state = 'active';
+    GET DIAGNOSTICS v_rows = ROW_COUNT;
+    PERFORM dba_mon._component_end(v_snapshot,'autovacuum',NULL,'SUCCESS',v_rows);
+  EXCEPTION WHEN OTHERS THEN
+    v_failures:=v_failures+1;
+    PERFORM dba_mon._component_end(v_snapshot,'autovacuum',NULL,'FAILED',NULL,SQLSTATE,SQLERRM);
   END;
 
   BEGIN

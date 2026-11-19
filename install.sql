@@ -1,5 +1,5 @@
 \set ON_ERROR_STOP on
-\echo 'Installing postgres-awr 1.3.9'
+\echo 'Installing postgres-awr 1.5.0'
 
 BEGIN;
 
@@ -87,7 +87,7 @@ CREATE TABLE IF NOT EXISTS dba_mon.snapshot (
   completed_at timestamptz,
   status text NOT NULL DEFAULT 'RUNNING'
     CHECK (status IN ('RUNNING','SUCCESS','PARTIAL','FAILED')),
-  collector_version text NOT NULL DEFAULT '1.3.9',
+  collector_version text NOT NULL DEFAULT '1.5.0',
   server_version_num integer NOT NULL,
   server_version text NOT NULL,
   system_identifier numeric(20,0),
@@ -263,6 +263,56 @@ CREATE TABLE IF NOT EXISTS dba_mon.memory_snap (
   shmem_total_bytes bigint
 );
 
+CREATE TABLE IF NOT EXISTS dba_mon.long_txn_snap (
+  snapshot_id      bigint NOT NULL REFERENCES dba_mon.snapshot(snapshot_id) ON DELETE CASCADE,
+  pid              integer NOT NULL,
+  usename          name,
+  application_name text,
+  client_addr      inet,
+  xact_start       timestamptz NOT NULL,
+  xact_age_seconds numeric NOT NULL,
+  query_start      timestamptz,
+  state            text,
+  wait_event_type  text,
+  wait_event       text,
+  query_text       text,
+  PRIMARY KEY (snapshot_id, pid)
+);
+
+CREATE TABLE IF NOT EXISTS dba_mon.conn_profile_snap (
+  snapshot_id      bigint  NOT NULL REFERENCES dba_mon.snapshot(snapshot_id) ON DELETE CASCADE,
+  application_name text    NOT NULL,
+  usename          name    NOT NULL,
+  state            text    NOT NULL,
+  session_count    integer NOT NULL CHECK (session_count >= 0),
+  PRIMARY KEY (snapshot_id, application_name, usename, state)
+);
+
+CREATE TABLE IF NOT EXISTS dba_mon.blocked_session_snap (
+  snapshot_id            bigint  NOT NULL REFERENCES dba_mon.snapshot(snapshot_id) ON DELETE CASCADE,
+  waiter_pid             integer NOT NULL,
+  waiter_usename         name,
+  waiter_app             text,
+  waiter_wait_event_type text,
+  waiter_wait_event      text,
+  waiter_query           text,
+  blocked_seconds        numeric NOT NULL,
+  blocker_pid            integer,
+  blocker_usename        name,
+  blocker_app            text,
+  blocker_state          text,
+  blocker_query          text,
+  PRIMARY KEY (snapshot_id, waiter_pid)
+);
+
+CREATE TABLE IF NOT EXISTS dba_mon.autovacuum_snap (
+  snapshot_id      bigint  NOT NULL REFERENCES dba_mon.snapshot(snapshot_id) ON DELETE CASCADE,
+  pid              integer NOT NULL,
+  query            text,
+  duration_seconds numeric NOT NULL,
+  PRIMARY KEY (snapshot_id, pid)
+);
+
 CREATE TABLE IF NOT EXISTS dba_mon.archiver_snap (
   snapshot_id bigint PRIMARY KEY REFERENCES dba_mon.snapshot(snapshot_id) ON DELETE CASCADE,
   archived_count bigint NOT NULL,
@@ -361,6 +411,7 @@ CREATE TABLE IF NOT EXISTS dba_mon.wait_sample (
   sampled_at timestamptz NOT NULL,
   wait_event_type text NOT NULL,
   wait_event text NOT NULL,
+  application_name text NOT NULL DEFAULT '',
   session_count integer NOT NULL CHECK (session_count >= 0),
   blocked_session_count integer NOT NULL CHECK (blocked_session_count >= 0)
 );
@@ -374,7 +425,7 @@ CREATE INDEX IF NOT EXISTS ix_wait_sample_time
 \ir reporting.sql
 
 INSERT INTO dba_mon.schema_version(version, description)
-VALUES ('1.3.9', 'Add BGWriter buffers_alloc and Connection Pressure Timeline')
+VALUES ('1.5.0', 'Add session monitoring: long txn, conn profile, blocked sessions, autovacuum, wait sampler app_name, sidenav')
 ON CONFLICT (version) DO NOTHING;
 
 COMMIT;
