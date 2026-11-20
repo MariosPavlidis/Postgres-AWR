@@ -584,26 +584,42 @@ BEGIN
 
   WITH RECURSIVE
   raw AS (
+    -- Pre-aggregate per (bucket, label, sampled_at) to collapse application_name rows
+    -- so that each row represents the total sessions for one event at one point in time.
     SELECT date_bin(interval '10 seconds',w.sampled_at,timestamptz '2000-01-01') bucket,
-           w.wait_event_type||' / '||w.wait_event AS original_label,w.session_count
+           w.wait_event_type||' / '||w.wait_event AS original_label,
+           w.sampled_at,
+           sum(w.session_count)::integer AS session_count
     FROM dba_mon.wait_sample w
     WHERE w.cluster_id=i.cluster_id AND w.sampled_at>=i.begin_time AND w.sampled_at<=i.end_time
       AND w.session_count>0
+    GROUP BY 1,2,3
   ), ranked AS (
     SELECT original_label,row_number() OVER (ORDER BY sum(session_count) DESC,original_label) rn
     FROM raw GROUP BY original_label
+  ), bucket_ticks AS (
+    -- Count distinct sample timestamps per bucket to compute averages correctly.
+    SELECT date_bin(interval '10 seconds',sampled_at,timestamptz '2000-01-01') bucket,
+           count(DISTINCT sampled_at) tick_count
+    FROM dba_mon.wait_sample
+    WHERE cluster_id=i.cluster_id AND sampled_at>=i.begin_time AND sampled_at<=i.end_time
+    GROUP BY 1
   ), mapped AS (
+    -- Divide by tick_count so each bucket shows average sessions (AAS), not a raw sum.
     SELECT r.bucket,CASE WHEN r.original_label='Idle in transaction / Idle in transaction'
                            THEN r.original_label
                          WHEN k.rn<=6 THEN r.original_label ELSE 'Other' END label,
            CASE WHEN r.original_label='Idle in transaction / Idle in transaction' THEN 8
-                WHEN k.rn<=6 THEN k.rn ELSE 7 END rank,sum(r.session_count)::integer sessions
+                WHEN k.rn<=6 THEN k.rn ELSE 7 END rank,
+           round(sum(r.session_count)::numeric/bt.tick_count)::integer sessions
     FROM raw r JOIN ranked k USING (original_label)
+    JOIN bucket_ticks bt ON bt.bucket=r.bucket
     GROUP BY r.bucket,CASE WHEN r.original_label='Idle in transaction / Idle in transaction'
                             THEN r.original_label
                           WHEN k.rn<=6 THEN r.original_label ELSE 'Other' END,
              CASE WHEN r.original_label='Idle in transaction / Idle in transaction' THEN 8
-                  WHEN k.rn<=6 THEN k.rn ELSE 7 END
+                  WHEN k.rn<=6 THEN k.rn ELSE 7 END,
+             bt.tick_count
   ), categories AS (
     SELECT label,min(rank)::integer rank FROM mapped GROUP BY label
   ), buckets AS (
