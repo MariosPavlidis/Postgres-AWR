@@ -344,8 +344,12 @@ BEGIN
     v_conn := CASE WHEN v_db.service_name IS NOT NULL
                    THEN format('service=%L connect_timeout=%s',
                                v_db.service_name,v_db.connect_timeout_seconds)
-                   ELSE format('dbname=%L connect_timeout=%s',
-                               v_db.database_name,v_db.connect_timeout_seconds) END;
+                   ELSE format('dbname=%L host=%L port=%s connect_timeout=%s',
+                               v_db.database_name,
+                               coalesce(inet_server_addr()::text,
+                                        trim(split_part(current_setting('unix_socket_directories'),',',1))),
+                               current_setting('port'),
+                               v_db.connect_timeout_seconds) END;
     BEGIN
       PERFORM dba_mon._component_begin(v_snapshot,'pgss',v_db.database_target_id);
       IF NOT v_db.collect_pgss THEN
