@@ -157,6 +157,9 @@ CREATE OR REPLACE FUNCTION dba_mon.report_pgss_delta(
   shared_blks_read bigint,
   shared_blks_hit bigint,
   temp_blks_written bigint,
+  temp_blks_read bigint,
+  temp_blk_read_time double precision,
+  temp_blk_write_time double precision,
   wal_bytes numeric
 )
 LANGUAGE sql
@@ -176,6 +179,9 @@ AS $$
          e.shared_blks_read - b.shared_blks_read,
          e.shared_blks_hit - b.shared_blks_hit,
          e.temp_blks_written - b.temp_blks_written,
+         e.temp_blks_read - b.temp_blks_read,
+         e.temp_blk_read_time - b.temp_blk_read_time,
+         e.temp_blk_write_time - b.temp_blk_write_time,
          e.wal_bytes - b.wal_bytes
   FROM dba_mon.pgss_snap AS b
   JOIN dba_mon.pgss_snap AS e
@@ -197,6 +203,7 @@ AS $$
     AND e.shared_blks_read >= b.shared_blks_read
     AND e.shared_blks_hit >= b.shared_blks_hit
     AND e.temp_blks_written >= b.temp_blks_written
+    AND e.temp_blks_read >= b.temp_blks_read
     AND e.wal_bytes >= b.wal_bytes;
 $$;
 
@@ -215,7 +222,9 @@ CREATE OR REPLACE FUNCTION dba_mon.report_pgss_metrics(
   interval_min_exec_time_ms double precision,
   interval_max_exec_time_ms double precision,
   rows bigint, average_rows_per_call numeric, shared_blks_read bigint,
-  shared_blks_hit bigint, temp_blks_written bigint, wal_bytes numeric
+  shared_blks_hit bigint, temp_blks_written bigint,
+  temp_blks_read bigint, temp_blk_read_time double precision,
+  temp_blk_write_time double precision, wal_bytes numeric
 )
 LANGUAGE sql STABLE SECURITY DEFINER
 SET search_path = pg_catalog, dba_mon
@@ -252,7 +261,8 @@ AS $$
         e.min_exec_time,e.max_exec_time,
         wm.interval_min,wm.interval_max,
         d.rows,round(d.rows::numeric/nullif(d.calls,0),3),d.shared_blks_read,
-        d.shared_blks_hit,d.temp_blks_written,d.wal_bytes
+        d.shared_blks_hit,d.temp_blks_written,
+        d.temp_blks_read,d.temp_blk_read_time,d.temp_blk_write_time,d.wal_bytes
  FROM dba_mon.report_pgss_delta($1,$2) d
  JOIN dba_mon.pgss_snap e
    ON e.snapshot_id=$2
@@ -975,7 +985,6 @@ BEGIN
     ('total_exec_time_ms','Top SQL by Total Execution Time'),
     ('calls','Top SQL by Calls'),('mean_exec_time_ms','Top SQL by Mean Execution Time'),
     ('shared_blks_read','Top SQL by Shared Blocks Read'),
-    ('temp_blks_written','Top SQL by Temporary Blocks Written'),
     ('wal_bytes','Top SQL by WAL Generated'),('rows','Top SQL by Rows')
   LOOP
     EXECUTE format($q$
@@ -1006,6 +1015,27 @@ BEGIN
       || ' * Min/max since reset: cumulative endpoint values since the last pg_stat_statements reset.</p>'
       || '<a class="back-to-top" href="#top">Back to top</a></section>';
   END LOOP;
+
+  SELECT coalesce(string_agg(format('<tr><td>%s</td><td>%s</td><td>%s</td>'
+      || '<td>%s</td><td>%s</td><td>%s</td><td>%s</td>'
+      || '<td class="query">%s</td></tr>',
+      dba_mon._html_escape(database_name::text),queryid,calls,
+      temp_blks_read,temp_blks_written,
+      round(temp_blk_read_time::numeric,3),round(temp_blk_write_time::numeric,3),
+      dba_mon._html_escape(left(query,500))),''),
+      '<tr><td colspan="8" class="empty">No valid SQL deltas</td></tr>') INTO v_rows
+  FROM (SELECT * FROM dba_mon.report_pgss_metrics(p_begin_snapshot_id,p_end_snapshot_id)
+        WHERE calls>0 ORDER BY temp_blks_written DESC NULLS LAST LIMIT 10) q;
+  v_html := v_html || '<section id="section-sql-temp-blks-written"><h2>Top SQL by Temporary Blocks Written</h2><div class="table-wrap"><table><thead><tr>'
+    || '<th>Database</th><th>Query ID</th><th>Calls</th>'
+    || '<th>Temp reads (blks)</th><th>Temp writes (blks)</th>'
+    || '<th>Temp read ms</th><th>Temp write ms</th>'
+    || '<th>SQL text</th></tr></thead><tbody>'
+    || v_rows || '</tbody></table></div>'
+    || '<p class="sub">Temp reads/writes: 8 KB blocks spilled to disk by sort and hash operations — does not include temporary table I/O (see local_blks_written).'
+    || ' Temp I/O times require track_io_timing = on; 0 means either no spill occurred or timing is not collected.'
+    || ' Cross-reference with Database Workload → Temp files/bytes for cluster-wide validation.</p>'
+    || '<a class="back-to-top" href="#top">Back to top</a></section>';
 
   SELECT coalesce(string_agg(format('<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td>'
       || '<td>%s</td><td class="query">%s</td></tr>',
