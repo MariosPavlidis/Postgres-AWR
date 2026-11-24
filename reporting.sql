@@ -798,6 +798,7 @@ BEGIN
     || '<a href="#section-sql-mean-exec-time-ms">By Mean Time</a>'
     || '<a href="#section-sql-shared-blks-read">By Blocks Read</a>'
     || '<a href="#section-sql-temp-blks-written">By Temp Writes</a>'
+    || '<a href="#section-sql-top-temp">Top Temp Stmts</a>'
     || '<a href="#section-sql-wal-bytes">By WAL</a>'
     || '<a href="#section-sql-rows">By Rows</a>'
     || '</details>'
@@ -1035,6 +1036,30 @@ BEGIN
     || '<p class="sub">Temp reads/writes: 8 KB blocks spilled to disk by sort and hash operations — does not include temporary table I/O (see local_blks_written).'
     || ' Temp I/O times require track_io_timing = on; 0 means either no spill occurred or timing is not collected.'
     || ' Cross-reference with Database Workload → Temp files/bytes for cluster-wide validation.</p>'
+    || '<a class="back-to-top" href="#top">Back to top</a></section>';
+
+  SELECT coalesce(string_agg(format('<tr><td>%s</td><td>%s</td><td>%s</td>'
+      || '<td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td>'
+      || '<td class="query">%s</td></tr>',
+      dba_mon._html_escape(database_name::text),queryid,calls,
+      round(total_exec_time_ms::numeric,3),round(mean_exec_time_ms::numeric,3),
+      temp_blks_read,temp_blks_written,temp_blks_read+temp_blks_written,
+      round(temp_blk_read_time::numeric,3),round(temp_blk_write_time::numeric,3),
+      dba_mon._html_escape(left(query,500))),''),
+      '<tr><td colspan="11" class="empty">No temp spills recorded in this interval</td></tr>') INTO v_rows
+  FROM (SELECT * FROM dba_mon.report_pgss_metrics(p_begin_snapshot_id,p_end_snapshot_id)
+        WHERE temp_blks_written > 0
+        ORDER BY temp_blks_read + temp_blks_written DESC NULLS LAST LIMIT 25) q;
+  v_html := v_html || '<section id="section-sql-top-temp"><h2>Top Statements by Temp Spill</h2><div class="table-wrap"><table><thead><tr>'
+    || '<th>Database</th><th>Query ID</th><th>Calls</th>'
+    || '<th>Total ms</th><th>Mean ms</th>'
+    || '<th>Temp reads (blks)</th><th>Temp writes (blks)</th><th>Temp total (blks)</th>'
+    || '<th>Temp read ms</th><th>Temp write ms</th>'
+    || '<th>SQL text</th></tr></thead><tbody>'
+    || v_rows || '</tbody></table></div>'
+    || '<p class="sub">Only statements with at least one temp block written (sort/hash spills). Sorted by total temp blocks (reads + writes).'
+    || ' Reduce spills by increasing work_mem for the offending session or query, or by rewriting the query to reduce sort/hash input size.'
+    || ' Temp I/O times require track_io_timing = on.</p>'
     || '<a class="back-to-top" href="#top">Back to top</a></section>';
 
   SELECT coalesce(string_agg(format('<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td>'
