@@ -346,8 +346,8 @@ BEGIN
                                v_db.service_name,v_db.connect_timeout_seconds)
                    ELSE format('dbname=%L host=%L port=%s connect_timeout=%s',
                                v_db.database_name,
-                               coalesce(inet_server_addr()::text,
-                                        trim(split_part(current_setting('unix_socket_directories'),',',1))),
+                               coalesce(nullif(trim(split_part(current_setting('unix_socket_directories'),',',1)),''),
+                                        host(inet_server_addr())),
                                current_setting('port'),
                                v_db.connect_timeout_seconds) END;
     BEGIN
