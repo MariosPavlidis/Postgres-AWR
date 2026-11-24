@@ -76,7 +76,7 @@ BEGIN
   RETURNING snapshot_id INTO v_snapshot;
 
   -- Materialize pg_stat_activity for all activity-based components (consistent point-in-time)
-  DROP TABLE IF EXISTS _act_snap;
+  BEGIN DROP TABLE _act_snap; EXCEPTION WHEN undefined_table THEN NULL; END;
   CREATE TEMP TABLE _act_snap ON COMMIT DROP AS
     SELECT clock_timestamp()                   AS snap_time,
            pid, usename, application_name, client_addr,
