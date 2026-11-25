@@ -280,6 +280,7 @@ CREATE OR REPLACE FUNCTION dba_mon.report_database_delta(
   p_begin_snapshot_id bigint, p_end_snapshot_id bigint
 ) RETURNS TABLE (
   datid oid, datname name, xact_commit bigint, xact_rollback bigint,
+  tps_commit numeric, tps_rollback numeric, tps_total numeric,
   blks_read bigint, blks_hit bigint, cache_hit_pct numeric,
   tup_returned bigint, tup_fetched bigint, tup_inserted bigint,
   tup_updated bigint, tup_deleted bigint, temp_files bigint,
@@ -292,6 +293,12 @@ SET search_path = pg_catalog, dba_mon
 AS $$
   SELECT e.datid, e.datname,
          e.xact_commit-b.xact_commit, e.xact_rollback-b.xact_rollback,
+         round((e.xact_commit-b.xact_commit)::numeric /
+           NULLIF(extract(epoch FROM se.started_at - sb.started_at),0),2),
+         round((e.xact_rollback-b.xact_rollback)::numeric /
+           NULLIF(extract(epoch FROM se.started_at - sb.started_at),0),2),
+         round(((e.xact_commit-b.xact_commit)+(e.xact_rollback-b.xact_rollback))::numeric /
+           NULLIF(extract(epoch FROM se.started_at - sb.started_at),0),2),
          e.blks_read-b.blks_read, e.blks_hit-b.blks_hit,
          round(100.0*(e.blks_hit-b.blks_hit) /
            NULLIF((e.blks_hit-b.blks_hit)+(e.blks_read-b.blks_read),0),2),
@@ -303,10 +310,10 @@ AS $$
          e.sessions-b.sessions, e.sessions_abandoned-b.sessions_abandoned,
          e.sessions_fatal-b.sessions_fatal, e.sessions_killed-b.sessions_killed
   FROM dba_mon.database_snap b JOIN dba_mon.database_snap e USING(datid)
+  JOIN dba_mon.snapshot sb ON sb.snapshot_id=$1
+  JOIN dba_mon.snapshot se ON se.snapshot_id=$2
   WHERE b.snapshot_id=$1 AND e.snapshot_id=$2
-    AND EXISTS (SELECT 1 FROM dba_mon.snapshot sb,dba_mon.snapshot se
-                WHERE sb.snapshot_id=$1 AND se.snapshot_id=$2
-                  AND sb.postmaster_start_time=se.postmaster_start_time)
+    AND sb.postmaster_start_time=se.postmaster_start_time
     AND b.stats_reset IS NOT DISTINCT FROM e.stats_reset
     AND e.xact_commit>=b.xact_commit AND e.xact_rollback>=b.xact_rollback
     AND e.blks_read>=b.blks_read AND e.blks_hit>=b.blks_hit
@@ -1122,15 +1129,16 @@ BEGIN
       || '</div></section>';
   END IF;
 
-  SELECT coalesce(string_agg(format('<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td>'
-      || '<td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>',
+  SELECT coalesce(string_agg(format('<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td>'
+      || '<td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>',
       dba_mon._html_escape(coalesce(datname::text,'Shared objects')),xact_commit,xact_rollback,
+      coalesce(tps_commit::text,'n/a'),coalesce(tps_rollback::text,'n/a'),coalesce(tps_total::text,'n/a'),
       coalesce(cache_hit_pct::text,'n/a'),tup_inserted,tup_updated,tup_deleted,temp_files,
-      pg_size_pretty(temp_bytes)),''),'<tr><td colspan="9" class="empty">No valid database deltas</td></tr>') INTO v_rows
+      pg_size_pretty(temp_bytes)),''),'<tr><td colspan="12" class="empty">No valid database deltas</td></tr>') INTO v_rows
   FROM dba_mon.report_database_delta(p_begin_snapshot_id,p_end_snapshot_id);
   v_html := v_html || '<section id="section-db-workload"><h2>Database Workload</h2><div class="table-wrap"><table><thead><tr>'
-    || '<th>Database</th><th>Commits</th><th>Rollbacks</th><th>Cache hit %</th><th>Inserts</th>'
-    || '<th>Updates</th><th>Deletes</th><th>Temp files</th><th>Temp bytes</th>'
+    || '<th>Database</th><th>Commits</th><th>Rollbacks</th><th>Commits/s</th><th>Rollbacks/s</th><th>TPS</th>'
+    || '<th>Cache hit %</th><th>Inserts</th><th>Updates</th><th>Deletes</th><th>Temp files</th><th>Temp bytes</th>'
     || '</tr></thead><tbody>' || v_rows || '</tbody></table></div><a class="back-to-top" href="#top">Back to top</a></section>';
 
   SELECT coalesce(string_agg(format('<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>',
