@@ -960,7 +960,7 @@ BEGIN
   WHERE snapshot_id = p_end_snapshot_id;
   v_html := v_html || '<section id="section-long-txn"><h2>Long-Running Transactions</h2><div class="table-wrap"><table><thead><tr>'
     || '<th>Age (s)</th><th>State</th><th>User</th><th>Application</th><th>Client</th>'
-    || '<th>Xact started (UTC)</th><th>Wait type</th><th>Wait event</th><th>Query text</th>'
+    || format('<th>Xact started (%s)</th>',dba_mon._html_escape(v_tz)) || '<th>Wait type</th><th>Wait event</th><th>Query text</th>'
     || '</tr></thead><tbody>' || v_rows || '</tbody></table></div>'
     || '<a class="back-to-top" href="#top">Back to top</a></section>';
 
